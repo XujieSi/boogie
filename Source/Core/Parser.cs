@@ -27,6 +27,8 @@ public class Parser {
 	public const int _float = 7;
 	public const int maxT = 107;
 
+  public static bool S = true;
+
 	const bool T = true;
 	const bool x = false;
 	const int minErrDist = 2;
@@ -56,9 +58,15 @@ public static int Parse (string/*!*/ filename, /*maybe null*/ List<string/*!*/> 
   Contract.Requires(filename != null);
   Contract.Requires(cce.NonNullElements(defines,true));
 
+      if (S)
+      {
+        return Parse(filename, "dummy.bpl", out program, useBaseName);
+      }
+
   if (defines == null) {
     defines = new List<string/*!*/>();
   }
+
 
   if (filename == "stdin.bpl") {
     var s = ParserHelper.Fill(Console.In, defines);

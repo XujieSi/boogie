@@ -64,6 +64,10 @@ namespace Microsoft.Boogie {
 
       List<string> fileList = new List<string>();
       foreach (string file in CommandLineOptions.Clo.Files) {
+        if (Parser.S) {
+          fileList.Add(file);
+          break;
+        }
         string extension = Path.GetExtension(file);
         if (extension != null) {
           extension = extension.ToLower();
@@ -77,18 +81,26 @@ namespace Microsoft.Boogie {
           fileList.Add(file);
         }
       }
-      foreach (string file in fileList) {
-        Contract.Assert(file != null);
-        string extension = Path.GetExtension(file);
-        if (extension != null) {
-          extension = extension.ToLower();
-        }
-        if (extension != ".bpl") {
-          ExecutionEngine.printer.ErrorWriteLine(Console.Out, "*** Error: '{0}': Filename extension '{1}' is not supported. Input files must be BoogiePL programs (.bpl).", file,
-              extension == null ? "" : extension);
-          goto END;
+
+      if (!Parser.S) {
+        foreach (string file in fileList)
+        {
+          Contract.Assert(file != null);
+          string extension = Path.GetExtension(file);
+          if (extension != null)
+          {
+            extension = extension.ToLower();
+          }
+          if (extension != ".bpl")
+          {
+            ExecutionEngine.printer.ErrorWriteLine(Console.Out, "*** Error: '{0}': Filename extension '{1}' is not supported. Input files must be BoogiePL programs (.bpl).", file,
+                extension == null ? "" : extension);
+            goto END;
+          }
         }
       }
+
+      Console.WriteLine("going to analyze boogie files");
       ExecutionEngine.ProcessFiles(fileList);
       return 0;
 

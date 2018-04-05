@@ -1068,6 +1068,10 @@ namespace Microsoft.Boogie {
           }
           return true;
 
+        case "normalArg":
+            Parser.S = false;
+          return true;
+
         case "inlineDepth":
           ps.GetNumericArgument(ref InlineDepth);
           return true;
