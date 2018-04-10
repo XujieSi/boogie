@@ -1332,6 +1332,10 @@ namespace Microsoft.Boogie
         return RunStagedHoudini(program, stats, er);
       }
 
+      if(CommandLineOptions.Clo.DLHoudini != null) {
+        return RunDLHoudini(program, stats, er);
+      }
+
       Houdini.HoudiniSession.HoudiniStatistics houdiniStats = new Houdini.HoudiniSession.HoudiniStatistics();
       Houdini.Houdini houdini = new Houdini.Houdini(program, houdiniStats);
       Houdini.HoudiniOutcome outcome = houdini.PerformHoudiniInference();
@@ -1449,6 +1453,33 @@ namespace Microsoft.Boogie
 
       return PipelineOutcome.Done;
     }
+
+    private static PipelineOutcome RunDLHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er)
+    {
+      Contract.Requires(stats != null);
+
+      //CommandLineOptions.Clo.PrintErrorModel = 1;
+      CommandLineOptions.Clo.UseProverEvaluate = true;
+      CommandLineOptions.Clo.ModelViewFile = "z3model";
+      CommandLineOptions.Clo.UseArrayTheory = true;
+      CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
+      
+      //Houdini.AbstractDomainFactory.Initialize(program);
+      //var domain = Houdini.AbstractDomainFactory.GetInstance(CommandLineOptions.Clo.AbstractHoudini);
+
+      // Run Abstract Houdini
+      var dl = new Houdini.DLHoudini(program, domain);
+      var dlout = dl.ComputeSummaries();
+      ProcessOutcome(dlout.outcome, dlout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+      ProcessErrors(dlout.errors, dlout.outcome, Console.Out, er);
+
+      //Houdini.PredicateAbs.Initialize(program);
+      //var abs = new Houdini.AbstractHoudini(program);
+      //abs.computeSummaries(new Houdini.PredicateAbs(program.TopLevelDeclarations.OfType<Implementation>().First().Name));
+
+      return PipelineOutcome.Done;
+    }
+
 
     #endregion
 

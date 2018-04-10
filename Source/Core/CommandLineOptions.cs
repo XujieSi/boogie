@@ -477,6 +477,7 @@ namespace Microsoft.Boogie {
     public int StagedHoudiniThreads = 1;
     public string VariableDependenceIgnore = null;
     public string AbstractHoudini = null;
+    public string DLHoudini = null;
     public bool UseUnsatCoreForContractInfer = false;
     public bool PrintAssignment = false;
     // TODO(wuestholz): Add documentation for this flag.
@@ -1180,6 +1181,14 @@ namespace Microsoft.Boogie {
                 if (ps.ConfirmArgumentCount(1))
                 {
                     AbstractHoudini = args[ps.i];
+                }
+                return true;
+            }
+        case "dlHoudini" : 
+            {
+                if(ps.ConfirmArgumentCount(1))
+                {
+                    DLHoudini = args[ps.i];
                 }
                 return true;
             }

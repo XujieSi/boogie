@@ -101,6 +101,7 @@
       <Link>version.cs</Link>
     </Compile>
     <Compile Include="AbstractHoudini.cs" />
+    <Compile Include="DLHoudini.cs" />
     <Compile Include="Checker.cs" />
     <Compile Include="AnnotationDependenceAnalyser.cs" />
     <Compile Include="Houdini.cs" />
