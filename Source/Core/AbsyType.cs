@@ -59,7 +59,7 @@ namespace Microsoft.Boogie {
     public override string ToString() {
       Contract.Ensures(Contract.Result<string>() != null);
       System.IO.StringWriter buffer = new System.IO.StringWriter();
-      using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/false, /*pretty=*/ false)) {
+      using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, false)) {
         this.Emit(stream);
       }
       return buffer.ToString();
@@ -244,17 +244,7 @@ namespace Microsoft.Boogie {
         return false;
       }
     }
-    public virtual bool IsFloat {
-      get {
-        return false;
-      }
-    }
     public virtual bool IsBool {
-      get {
-        return false;
-      }
-    }
-    public virtual bool IsRMode {
       get {
         return false;
       }
@@ -330,29 +320,6 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public virtual bool isFloat {
-      get {
-        return false;
-      }
-    }
-    public virtual int FloatExponent
-    {
-      get
-      {
-        {
-          Contract.Assert(false);
-          throw new cce.UnreachableException();
-        } // Type.FloatExponent should never be called
-      }
-    }
-    public virtual int FloatSignificand {
-      get {
-        {
-          Contract.Assert(false);
-          throw new cce.UnreachableException();
-        } // Type.FloatSignificand should never be called
-      }
-    }
     public virtual bool IsBv {
       get {
         return false;
@@ -370,7 +337,6 @@ namespace Microsoft.Boogie {
     public static readonly Type/*!*/ Int = new BasicType(SimpleType.Int);
     public static readonly Type/*!*/ Real = new BasicType(SimpleType.Real);
     public static readonly Type/*!*/ Bool = new BasicType(SimpleType.Bool);
-    public static readonly Type/*!*/ RMode = new BasicType(SimpleType.RMode);
     private static BvType[] bvtypeCache;
 
     static public BvType GetBvType(int sz) {
@@ -390,14 +356,6 @@ namespace Microsoft.Boogie {
       } else {
         return new BvType(sz);
       }
-    }
-
-    static public FloatType GetFloatType(int sig, int exp) {
-      Contract.Requires(0 <= exp);
-      Contract.Requires(0 <= sig);
-      Contract.Ensures(Contract.Result<FloatType>() != null);
-
-      return new FloatType(sig, exp);
     }
 
     //------------ Match formal argument types on actual argument types
@@ -479,7 +437,7 @@ namespace Microsoft.Boogie {
     public static IDictionary<TypeVariable/*!*/, Type/*!*/>/*!*/
                   MatchArgumentTypes(List<TypeVariable>/*!*/ typeParams,
                                      List<Type>/*!*/ formalArgs,
-                                     IList<Expr>/*!*/ actualArgs,
+                                     List<Expr>/*!*/ actualArgs,
                                      List<Type> formalOuts,
                                      List<IdentifierExpr> actualOuts,
                                      string/*!*/ opName,
@@ -549,7 +507,7 @@ namespace Microsoft.Boogie {
     public static List<Type> CheckArgumentTypes(List<TypeVariable>/*!*/ typeParams,
                                              out List<Type/*!*/>/*!*/ actualTypeParams,
                                              List<Type>/*!*/ formalIns,
-                                             IList<Expr>/*!*/ actualIns,
+                                             List<Expr>/*!*/ actualIns,
                                              List<Type>/*!*/ formalOuts,
                                              List<IdentifierExpr> actualOuts,
                                              IToken/*!*/ typeCheckingSubject,
@@ -915,8 +873,6 @@ namespace Microsoft.Boogie {
           return "real";
         case SimpleType.Bool:
           return "bool";
-        case SimpleType.RMode:
-          return "rmode";
       }
       Debug.Assert(false, "bad type " + T);
       {
@@ -1042,178 +998,12 @@ namespace Microsoft.Boogie {
         return this.T == SimpleType.Bool;
       }
     }
-    public override bool IsRMode
-    {
-      get
-      {
-        return this.T == SimpleType.RMode;
-      }
-    }
 
     public override Absy StdDispatch(StandardVisitor visitor) {
       //Contract.Requires(visitor != null);
       Contract.Ensures(Contract.Result<Absy>() != null);
       return visitor.VisitBasicType(this);
     }
-  }
-
-  //=====================================================================
-
-  //Note that the functions in this class were directly copied from the BV class just below
-  public class FloatType : Type { 
-    public readonly int Significand; //Size of Significand in bits
-    public readonly int Exponent; //Size of exponent in bits
-
-    public FloatType(IToken token, int significand, int exponent)
-      : base(token) {
-      Contract.Requires(token != null);
-      Significand = significand;
-      Exponent = exponent;
-    }
-
-    public FloatType(int significand, int exponent)
-      : base(Token.NoToken) {
-      Significand = significand;
-      Exponent = exponent;
-    }
-
-    //-----------  Cloning  ----------------------------------
-    // We implement our own clone-method, because bound type variables
-    // have to be created in the right way. It is /not/ ok to just clone
-    // everything recursively.
-
-    public override Type Clone(IDictionary<TypeVariable/*!*/, TypeVariable/*!*/>/*!*/ varMap)
-    {
-      //Contract.Requires(cce.NonNullElements(varMap));
-      Contract.Ensures(Contract.Result<Type>() != null);
-      // FloatTypes are immutable anyway, we do not clone
-      return this;
-    }
-
-    public override Type CloneUnresolved()
-    {
-      Contract.Ensures(Contract.Result<Type>() != null);
-      return this;
-    }
-
-    //-----------  Linearisation  ----------------------------------
-
-    public override void Emit(TokenTextWriter stream, int contextBindingStrength)
-    {
-      //Contract.Requires(stream != null);
-      // no parentheses are necessary for bitvector-types
-      stream.SetToken(this);
-      stream.Write("{0}", this);
-    }
-
-    public override string ToString()
-    {
-      Contract.Ensures(Contract.Result<string>() != null);
-      return "float" + Significand + "e" + Exponent;
-    }
-
-    //-----------  Equality  ----------------------------------
-
-    [Pure]
-    public override bool Equals(Type/*!*/ that,
-                                List<TypeVariable>/*!*/ thisBoundVariables,
-                                List<TypeVariable>/*!*/ thatBoundVariables)
-    {
-      FloatType thatFloatType = TypeProxy.FollowProxy(that.Expanded) as FloatType;
-      return thatFloatType != null && this.Significand == thatFloatType.Significand && this.Exponent == thatFloatType.Exponent;
-    }
-
-    //-----------  Unification of types  -----------
-
-    public override bool Unify(Type/*!*/ that,
-                               List<TypeVariable>/*!*/ unifiableVariables,
-      // an idempotent substitution that describes the
-      // unification result up to a certain point
-                               IDictionary<TypeVariable/*!*/, Type/*!*/>/*!*/ unifier)
-    {
-      //Contract.Requires(that != null);
-      //Contract.Requires(unifiableVariables != null);
-      //Contract.Requires(cce.NonNullElements(unifier));
-      that = that.Expanded;
-      if (that is TypeProxy || that is TypeVariable) {
-        return that.Unify(this, unifiableVariables, unifier); 
-      }
-      else {
-        return this.Equals(that); 
-      }
-    }
-
-    //-----------  Substitution of free variables with types not containing bound variables  -----------------
-
-    public override Type Substitute(IDictionary<TypeVariable/*!*/, Type/*!*/>/*!*/ subst)
-    {
-      Contract.Ensures(Contract.Result<Type>() != null);
-      return this;
-    }
-
-    //-----------  Hashcodes  ----------------------------------
-
-    [Pure]
-    public override int GetHashCode(List<TypeVariable> boundVariables)
-    {
-      return this.Significand.GetHashCode() + this.Exponent.GetHashCode();
-    }
-
-    //-----------  Resolution  ----------------------------------
-
-    public override Type ResolveType(ResolutionContext rc)
-    {
-      //Contract.Requires(rc != null);
-      Contract.Ensures(Contract.Result<Type>() != null);
-      // nothing to resolve
-      return this;
-    }
-
-    // determine the free variables in a type, in the order in which the variables occur
-    public override List<TypeVariable>/*!*/ FreeVariables
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<List<TypeVariable>>() != null);
-
-        return new List<TypeVariable>();  // bitvector-type are closed
-      }
-    }
-
-    public override List<TypeProxy/*!*/>/*!*/ FreeProxies
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<List<TypeProxy>>()));
-        return new List<TypeProxy/*!*/>();
-      }
-    }
-
-    //-----------  Getters/Issers  ----------------------------------
-
-    public override bool IsFloat {
-      get {
-        return true;
-      }
-    }
-    public override int FloatSignificand {
-      get {
-        return Significand;
-      }
-    }
-    public override int FloatExponent {
-      get {
-        return Exponent;
-      }
-    }
-
-    public override Absy StdDispatch(StandardVisitor visitor)
-    {
-      //Contract.Requires(visitor != null);
-      Contract.Ensures(Contract.Result<Absy>() != null);
-      return visitor.VisitFloatType(this);
-    }
-
   }
 
   //=====================================================================
@@ -1496,8 +1286,7 @@ Contract.Requires(that != null);
     public override Type ResolveType(ResolutionContext rc) {
       //Contract.Requires(rc != null);
       Contract.Ensures(Contract.Result<Type>() != null);
-      // first case: the type name denotes a bitvector-type, float-type, or rmode-type
-
+      // first case: the type name denotes a bitvector-type
       if (Name.StartsWith("bv") && Name.Length > 2) {
         bool is_bv = true;
         for (int i = 2; i < Name.Length; ++i) {
@@ -1514,39 +1303,6 @@ Contract.Requires(that != null);
           }
           return new BvType(tok, int.Parse(Name.Substring(2)));
         }
-      }
-
-      if (Name.StartsWith("float") && Name.Length > 5)
-      {
-        bool is_float = true;
-        int i = 5;
-        for (; is_float && Name[i] != 'e'; i++)
-          if (i >= Name.Length-1 || !char.IsDigit(Name[i])) //There must be an e
-            is_float = false;
-        int mid = i;
-        i++;
-        for (; i < Name.Length && is_float; i++)
-          if (!char.IsDigit(Name[i]))
-            is_float = false;
-        if (is_float) {
-          if (Arguments.Count > 0) {
-            rc.Error(this,
-                     "float types must not be applied to arguments: {0}",
-                     Name);
-          }
-          return new FloatType(tok, int.Parse(Name.Substring(5, mid-5)), int.Parse(Name.Substring(mid+1)));
-        }
-      }
-
-      if (Name.Equals("rmode"))
-      {
-        if (Arguments.Count > 0)
-        {
-          rc.Error(this,
-                   "rounding mode type must not be applied to arguments: {0}",
-                   Name);
-        }
-        return Type.RMode;
       }
 
       // second case: the identifier is resolved to a type variable
@@ -2143,42 +1899,10 @@ Contract.Requires(that != null);
         return p != null && p.IsReal;
       }
     }
-    public override bool IsFloat {
-      get {
-        Type p = ProxyFor;
-        return p != null && p.IsFloat;
-      }
-    }
-    public override int FloatExponent {
-        get {
-          Type p = ProxyFor;
-          if (p == null || !p.IsFloat)
-            return base.FloatExponent; //Shouldn't happen, so get an unreachable exception
-          return p.FloatExponent;
-        }
-    }
-    public override int FloatSignificand {
-        get {
-          Type p = ProxyFor;
-          if (p == null || !p.IsFloat)
-            return base.FloatSignificand; //Shouldn't happen, so get an unreachable exception
-          return p.FloatSignificand;
-        }
-    }
-
     public override bool IsBool {
       get {
         Type p = ProxyFor;
         return p != null && p.IsBool;
-      }
-    }
-
-    public override bool IsRMode
-    {
-      get
-      {
-        Type p = ProxyFor;
-        return p != null && p.IsRMode;
       }
     }
 
@@ -2370,11 +2094,6 @@ Contract.Requires(that != null);
       Contract.Requires(t != null);
       Contract.Requires(t.IsBv);
       Contract.Ensures(0 <= Contract.Result<int>());
-
-      if (t is TypeSynonymAnnotation) {
-        return MinBitsFor(((TypeSynonymAnnotation)t).ExpandedType);
-      }
-
       if (t is BvType) {
         return t.BvBits;
       } else {
@@ -2476,11 +2195,6 @@ Contract.Requires(that != null);
       Contract.Requires(t != null);
       Contract.Requires(t.IsBv && 0 <= to && MinBitsFor(t) <= to);
       Contract.Ensures(0 <= Contract.Result<int>() && Contract.Result<int>() <= to);
-
-      if(t is TypeSynonymAnnotation) {
-        return IncreaseBits(((TypeSynonymAnnotation)t).ExpandedType, to);
-      }
-
       t = FollowProxy(t);
       if (t is BvType) {
         return to - t.BvBits;
@@ -3023,44 +2737,14 @@ Contract.Requires(that != null);
         return ExpandedType.IsInt;
       }
     }
-    public override bool IsReal
-    {
-      get
-      {
+    public override bool IsReal {
+      get {
         return ExpandedType.IsReal;
       }
     }
-    public override bool IsFloat
-    {
-      get
-      {
-        return ExpandedType.IsFloat;
-      }
-    }
-    public override int FloatExponent 
-    {
-      get 
-      {
-        return ExpandedType.FloatExponent;
-      }
-    }
-
-    public override int FloatSignificand 
-    {
-      get 
-      {
-        return ExpandedType.FloatSignificand;
-      }
-    }
-
     public override bool IsBool {
       get {
         return ExpandedType.IsBool;
-      }
-    }
-    public override bool IsRMode {
-      get {
-        return ExpandedType.IsRMode;
       }
     }
 
@@ -3832,8 +3516,7 @@ Contract.Ensures(Contract.ValueAtReturn(out tpInstantiation) != null);
   public enum SimpleType {
     Int,
     Real,
-    Bool,
-    RMode
+    Bool
   };
 
 

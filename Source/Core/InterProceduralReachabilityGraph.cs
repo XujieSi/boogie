@@ -12,8 +12,8 @@ namespace Microsoft.Boogie
   public interface IInterproceduralReachabilityGraph {
 
     bool MayReach(Block src, Block dst);
-
     void dump();
+
 
     Block GetNewEntryBlock(string p);
 
@@ -58,20 +58,12 @@ namespace Microsoft.Boogie
           }
         }
       }
-
-      foreach(var n in nodes) {
-        // If there are disconnected nodes, put them into the
-        // graph as self-loops so that every node is represented in
-        // the graph
-        if(!reachabilityGraph.Nodes.Contains(n)) {
-          reachabilityGraph.AddEdge(n, n);
-        }
-      }
+      
     }
 
     private IEnumerable<Block> OriginalProgramBlocks()
     {
-      return prog.Implementations.Select(Item => Item.Blocks).SelectMany(Item => Item);
+      return prog.TopLevelDeclarations.OfType<Implementation>().Select(Item => Item.Blocks).SelectMany(Item => Item);
     }
 
     private void AddCallAndReturnEdges()
@@ -126,7 +118,7 @@ namespace Microsoft.Boogie
     private void ProcessBodilessProcedures()
     {
       #region Add single node CFG for procedures with no body
-      foreach (var proc in prog.Procedures)
+      foreach (var proc in prog.TopLevelDeclarations.OfType<Procedure>())
       {
         if (!newProcedureEntryNodes.ContainsKey(proc.Name))
         {
@@ -142,7 +134,7 @@ namespace Microsoft.Boogie
     private void ProcessImplementations()
     {
       #region Transform implementation CFGs so that every call is in its own basic block
-      foreach (var impl in prog.Implementations)
+      foreach (var impl in prog.TopLevelDeclarations.OfType<Implementation>())
       {
         string exitLabel = "__" + impl.Name + "_newExit";
         Block newExit = new Block(Token.NoToken, exitLabel, new List<Cmd>(), new GotoCmd(Token.NoToken, new List<Block>()));
@@ -150,9 +142,10 @@ namespace Microsoft.Boogie
         newProcedureExitNodes[impl.Name] = newExit;
         foreach (Block b in impl.Blocks)
         {
+          List<List<Cmd>> partition = PartitionCmdsAccordingToPredicate(b.Cmds, Item => Item is CallCmd);
           Block prev = null;
           int i = 0;
-          foreach (List<Cmd> cmds in SeparateCallCmds(b.Cmds))
+          foreach (List<Cmd> cmds in partition)
           {
             Block newBlock;
             if (prev == null)
@@ -197,24 +190,16 @@ namespace Microsoft.Boogie
       #endregion
     }
 
-    private static List<List<Cmd>> SeparateCallCmds(List<Cmd> Cmds) {
+    public static List<List<Cmd>> PartitionCmdsAccordingToPredicate(List<Cmd> Cmds, Func<Cmd, bool> Predicate) {
       List<List<Cmd>> result = new List<List<Cmd>>();
-      int currentIndex = 0;
-      while(currentIndex < Cmds.Count) {
-        if(Cmds[currentIndex] is CallCmd) {
-          result.Add(new List<Cmd> { Cmds[currentIndex] });
-          currentIndex++;
-        } else {
-          List<Cmd> nonCallCmds = new List<Cmd>();
-          while(currentIndex < Cmds.Count && !(Cmds[currentIndex] is CallCmd)) {
-            nonCallCmds.Add(Cmds[currentIndex]);
-            currentIndex++;
-          }
-          result.Add(nonCallCmds);
+      List<Cmd> current = new List<Cmd>();
+      result.Add(current);
+      foreach(Cmd cmd in Cmds) {
+        if(Predicate(cmd) && current.Count > 0) {
+           current = new List<Cmd>();
+           result.Add(current);
         }
-      }
-      if(result.Count == 0) {
-        result.Add(new List<Cmd>());
+        current.Add(cmd);
       }
       return result;
     }

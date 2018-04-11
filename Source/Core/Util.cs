@@ -80,13 +80,10 @@ namespace Microsoft.Boogie {
     bool setTokens = true;
     int line = 1;
     int col;
-    public bool UseForComputingChecksums;
 
     private const int indent_size = 2;
-    private int most_recent_indent_level = 0;
-    protected string Indent(int level) {
+    protected static string Indent(int level) {
       Contract.Ensures(Contract.Result<string>() != null);
-      most_recent_indent_level = level;
       return new string(' ', (indent_size * level));
     }
 
@@ -122,7 +119,6 @@ namespace Microsoft.Boogie {
                 "requires",
                 "return",
                 "returns",
-                "rmode",
                 "true",
                 "type",
                 "unique",
@@ -130,93 +126,6 @@ namespace Microsoft.Boogie {
                 "where",
                 "while",
         };
-
-    // "Pretty" printing: not very efficient, and not necessarily very pretty, but helps a bit 
-    private readonly bool pretty;
-    
-    // The stack of writers in a current separator-block.
-    // The string is an optional identifier that allows you
-    // to not start a new indentation for e.g. "&&" in "a && b && c".
-    // When the pretty printing is finished, this should be empty.
-    Stack<KeyValuePair<string, List<TextWriter>>> wstk;
-
-    // The original writer: where everything should finally end up.
-    TextWriter actual_writer;
-
-    public bool push(string type = null) {
-      if (pretty) {
-        if (wstk == null) {
-          wstk = new Stack<KeyValuePair<string, List<TextWriter>>>();
-          actual_writer = writer;
-        }
-        if (wstk.Count > 0 && wstk.Peek().Key == type && type != null) {
-          sep();
-          return false; // don't actually pop this thing (send this bool to pop)
-        } else {
-          wstk.Push(new KeyValuePair<string, List<TextWriter>>(type, new List<TextWriter> { }));
-          sep();
-          return true;  // this needs to be popped
-        }
-      } else {
-        return false;
-      }
-    }
-
-    public void pop(bool do_it = true) {
-      if (pretty) {
-        if (do_it) {
-          List<TextWriter> ws = wstk.Pop().Value;
-          // try to figure out if you should insert line breaks between
-          // them or print them on one single line
-          // this breaks down when there are newlines inserted
-          List<String> ss = new List<String>();
-          int len = 0;
-          foreach (TextWriter w in ws) {
-            foreach (String s in w.ToString().Split(new String[] { "\r\n", "\n" }, StringSplitOptions.None)) {
-              if (s.Length > 0) {
-                ss.Add(s);
-                len += s.Length;
-                // len = Math.Max(len, s.Length);
-              }
-            }
-          }
-          // figure out which is the next writer to use
-          List<TextWriter> tw = wstk.Count > 0 ? wstk.Peek().Value : null;
-          string indent_string;
-          if (tw == null) {
-            writer = actual_writer;
-            indent_string = new string(' ', indent_size * most_recent_indent_level + indent_size);
-          } else {
-            writer = tw.Last();
-            indent_string = new string(' ', indent_size);
-          }
-          // write the strings (we would like to know WHERE we are in the document here)
-          if (len > 80 /* - wstk.Count * 2 */) {
-            for (int i = 0; i < ss.Count; i++) {
-              if (i != ss.Count - 1) {
-                writer.WriteLine(ss[i]);
-                writer.Write(indent_string);
-              } else {
-                writer.Write(ss[i]);
-              }
-            }
-          } else {
-            foreach (String s in ss) {
-              writer.Write(s);
-            }
-          }
-        }
-      }
-    }
-
-    public void sep() {
-      if (pretty) {
-        List<TextWriter> ws = wstk.Peek().Value;
-
-        writer = new StringWriter();
-        wstk.Peek().Value.Add(writer);
-      }
-    }
 
     private IToken/*!*/ CurrentToken {
       get {
@@ -232,20 +141,7 @@ namespace Microsoft.Boogie {
 
     public void SetToken(Absy absy) {
       Contract.Requires(absy != null);
-      this.SetToken(t => absy.tok = t);
-    }
-
-    public void SetToken(IfThenElse expr)
-    {
-      Contract.Requires(expr != null);
-      this.SetToken(t => expr.tok = t);
-    }
-
-    public void SetToken(Action<IToken> setter) {
-      Contract.Requires(setter != null);
-      if (this.setTokens) {
-        setter(this.CurrentToken);
-      }
+      this.SetToken(ref absy.tok);
     }
 
     public void SetToken(ref IToken tok) {
@@ -264,63 +160,46 @@ namespace Microsoft.Boogie {
       } else if (name.Length > 2 && name[0] == 'b' && name[1] == 'v') {
         int dummy;
         return int.TryParse(name.Substring(2), out dummy) ? "\\" + name : name;
-      } else if (name.Contains('@')) {
-        return SanitizeIdentifier(name.Replace("@", "#AT#"));
       } else {
         return name;
       }
     }
 
     public TokenTextWriter(string filename)
-        : this(filename, false)
-    {
-    }
-
-    public TokenTextWriter(string filename, bool pretty)
       : base() {
       Contract.Requires(filename != null);
-      this.pretty = pretty;
       this.filename = filename;
       this.writer = new StreamWriter(filename);
     }
 
-    public TokenTextWriter(string filename, bool setTokens, bool pretty)
+    public TokenTextWriter(string filename, bool setTokens)
       : base() {
       Contract.Requires(filename != null);
-      this.pretty = pretty;
       this.filename = filename;
       this.writer = new StreamWriter(filename);
       this.setTokens = setTokens;
     }
 
-    public TokenTextWriter(string filename, TextWriter writer, bool setTokens, bool pretty)
+    public TokenTextWriter(string filename, TextWriter writer, bool setTokens)
       : base() {
       Contract.Requires(writer != null);
       Contract.Requires(filename != null);
-      this.pretty = pretty;
       this.filename = filename;
       this.writer = writer;
       this.setTokens = setTokens;
     }
 
-    public TokenTextWriter(string filename, TextWriter writer, bool pretty)
+    public TokenTextWriter(string filename, TextWriter writer)
       : base() {
       Contract.Requires(writer != null);
       Contract.Requires(filename != null);
-      this.pretty = pretty;
       this.filename = filename;
       this.writer = writer;
     }
 
     public TokenTextWriter(TextWriter writer)
-        : this(writer, false)
-    {
-    }
-
-    public TokenTextWriter(TextWriter writer, bool pretty)
       : base() {
       Contract.Requires(writer != null);
-      this.pretty = pretty;
       this.filename = "<no file>";
       this.writer = writer;
     }
@@ -332,10 +211,7 @@ namespace Microsoft.Boogie {
     }
 
     public void WriteIndent(int level) {
-      if (!UseForComputingChecksums)
-      {
-        this.Write(Indent(level));
-      }
+      this.Write(Indent(level));
     }
 
     public void Write(string text, params object[] args) {
@@ -493,7 +369,7 @@ namespace Microsoft.Boogie {
       } else if (e is NAryExpr) {
         NAryExpr ne = (NAryExpr)e;
         IAppliable fun = ne.Fun;
-        var eSeq = ne.Args;
+        List<Expr> eSeq = ne.Args;
         if (fun != null) {
           if ((fun.FunctionName == "$Length" || fun.FunctionName == "$StringLength") && eSeq.Count == 1) {
             Expr e0 = eSeq[0];
@@ -682,13 +558,14 @@ namespace Microsoft.Boogie {
       // any filename extension specified by the user.  We base our
       // calculations on that there is at most one occurrence of @PROC@.
       if (180 <= fileName.Length - 6 + pn.Length) {
-        pn = pn.Substring(0, Math.Max(180 - (fileName.Length - 6), 0)) + "-n" + System.Threading.Interlocked.Increment(ref sequenceId);
+        pn = pn.Substring(0, Math.Max(180 - (fileName.Length - 6), 0)) + "-n" + sequenceNumber;
+        sequenceNumber++;
       }
 
       return fileName.Replace("@PROC@", pn);
     }
 
-    private static int sequenceId = -1;
+    private static int sequenceNumber = 0;
 
   }
 }

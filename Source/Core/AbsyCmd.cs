@@ -1,4 +1,4 @@
-﻿//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 //
 // Copyright (C) Microsoft Corporation.  All Rights Reserved.
 //
@@ -24,90 +24,32 @@ namespace Microsoft.Boogie {
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(tok != null);
-      Contract.Invariant(Anonymous || this.labelName != null);
-      Contract.Invariant(this._ec == null || this._tc == null);
-      Contract.Invariant(this._simpleCmds != null);
+      Contract.Invariant(Anonymous || LabelName != null);
+      Contract.Invariant(ec == null || tc == null);
+      Contract.Invariant(simpleCmds != null);
     }
 
     public readonly IToken/*!*/ tok;
-
+    public string LabelName;
     public readonly bool Anonymous;
 
-    private string labelName;
-
-    public string LabelName
-    {
-      get
-      {
-        Contract.Ensures(Anonymous || Contract.Result<string>() != null);
-        return this.labelName;
-      }
-      set
-      {
-        Contract.Requires(Anonymous || value != null);
-        this.labelName = value;
-      }
-    }
-
     [Rep]
-    private List<Cmd>/*!*/ _simpleCmds;
+    public List<Cmd>/*!*/ simpleCmds;
+    public StructuredCmd ec;
+    public TransferCmd tc;
 
-    public List<Cmd>/*!*/ simpleCmds
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<List<Cmd>>() != null);
-        return this._simpleCmds;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._simpleCmds = value;
-      }
-    }
-
-    private StructuredCmd _ec;
-
-    public StructuredCmd ec
-    {
-      get
-      {
-        return this._ec;
-      }
-      set
-      {
-        Contract.Requires(value == null || this.tc == null);
-        this._ec = value;
-      }
-    }
-
-    private TransferCmd _tc;
-
-    public TransferCmd tc
-    {
-      get
-      {
-        return this._tc;
-      }
-      set
-      {
-        Contract.Requires(value == null || this.ec == null);
-        this._tc = value;
-      }
-    }
-
-    public BigBlock successorBigBlock;  // semantic successor (may be a back-edge, pointing back to enclosing while statement); null if successor is end of procedure body (or if field has not yet been initialized)
+    public BigBlock successorBigBlock;  // null if successor is end of procedure body (or if field has not yet been initialized)
 
     public BigBlock(IToken tok, string labelName, [Captured] List<Cmd> simpleCmds, StructuredCmd ec, TransferCmd tc) {
       Contract.Requires(simpleCmds != null);
       Contract.Requires(tok != null);
       Contract.Requires(ec == null || tc == null);
       this.tok = tok;
+      this.LabelName = labelName;
       this.Anonymous = labelName == null;
-      this.labelName = labelName;
-      this._simpleCmds = simpleCmds;
-      this._ec = ec;
-      this._tc = tc;
+      this.simpleCmds = simpleCmds;
+      this.ec = ec;
+      this.tc = tc;
     }
 
     public void Emit(TokenTextWriter stream, int level) {
@@ -132,51 +74,25 @@ namespace Microsoft.Boogie {
 
   public class StmtList {
     [Rep]
-    private readonly List<BigBlock/*!*/>/*!*/ bigBlocks;
-
-    public IList<BigBlock/*!*/>/*!*/ BigBlocks
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<IList<BigBlock>>() != null);
-        Contract.Ensures(Contract.Result<IList<BigBlock>>().IsReadOnly);
-        return this.bigBlocks.AsReadOnly();
-      }
-    }
-
+    public readonly List<BigBlock/*!*/>/*!*/ BigBlocks;
     public List<Cmd> PrefixCommands;
     public readonly IToken/*!*/ EndCurly;
     public StmtList ParentContext;
     public BigBlock ParentBigBlock;
-
-    private readonly HashSet<string/*!*/>/*!*/ labels = new HashSet<string/*!*/>();
-
-    public void AddLabel(string label)
-    {
-      labels.Add(label);
-    }
-
-    public IEnumerable<string/*!*/>/*!*/ Labels
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<string/*!*/>/*!*/>()));
-        return this.labels.AsEnumerable<string>();
-      }
-    }
-
+    public HashSet<string/*!*/>/*!*/ Labels = new HashSet<string/*!*/>();
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(EndCurly != null);
-      Contract.Invariant(cce.NonNullElements(this.bigBlocks));
-      Contract.Invariant(cce.NonNullElements(this.labels));
+      Contract.Invariant(cce.NonNullElements(BigBlocks));
+      Contract.Invariant(cce.NonNullElements(Labels));
     }
 
-    public StmtList(IList<BigBlock/*!*/>/*!*/ bigblocks, IToken endCurly) {
+
+    public StmtList([Captured] List<BigBlock/*!*/>/*!*/ bigblocks, IToken endCurly) {
       Contract.Requires(endCurly != null);
       Contract.Requires(cce.NonNullElements(bigblocks));
       Contract.Requires(bigblocks.Count > 0);
-      this.bigBlocks = new List<BigBlock>(bigblocks);
+      this.BigBlocks = bigblocks;
       this.EndCurly = endCurly;
     }
 
@@ -318,10 +234,6 @@ namespace Microsoft.Boogie {
     List<Block/*!*/> blocks;
     string/*!*/ prefix = "anon";
     int anon = 0;
-    int FreshAnon()
-    {
-      return anon++;
-    }
     HashSet<string/*!*/> allLabels = new HashSet<string/*!*/>();
     Errors/*!*/ errorHandler;
     [ContractInvariantMethod]
@@ -411,7 +323,7 @@ namespace Microsoft.Boogie {
               prefix += "0";
             }
           }
-          stmtList.AddLabel(b.LabelName);
+          stmtList.Labels.Add(b.LabelName);
         }
       }
 
@@ -497,7 +409,8 @@ namespace Microsoft.Boogie {
       Contract.Requires(stmtList != null);
       foreach (BigBlock b in stmtList.BigBlocks) {
         if (b.LabelName == null) {
-          b.LabelName = prefix + FreshAnon();
+          b.LabelName = prefix + anon;
+          anon++;
         }
         if (b.ec is WhileCmd) {
           WhileCmd wcmd = (WhileCmd)b.ec;
@@ -521,7 +434,7 @@ namespace Microsoft.Boogie {
 
         if (big.ec is WhileCmd) {
           WhileCmd wcmd = (WhileCmd)big.ec;
-          RecordSuccessors(wcmd.Body, big);
+          RecordSuccessors(wcmd.Body, successor);
         } else {
           for (IfCmd ifcmd = big.ec as IfCmd; ifcmd != null; ifcmd = ifcmd.elseIf) {
             RecordSuccessors(ifcmd.thn, successor);
@@ -581,10 +494,10 @@ namespace Microsoft.Boogie {
 
         } else if (b.ec is WhileCmd) {
           WhileCmd wcmd = (WhileCmd)b.ec;
-          var a = FreshAnon();
-          string loopHeadLabel = prefix + a + "_LoopHead";
-          string/*!*/ loopBodyLabel = prefix + a + "_LoopBody";
-          string loopDoneLabel = prefix + a + "_LoopDone";
+          string loopHeadLabel = prefix + anon + "_LoopHead";
+          string/*!*/ loopBodyLabel = prefix + anon + "_LoopBody";
+          string loopDoneLabel = prefix + anon + "_LoopDone";
+          anon++;
 
           List<Cmd> ssBody = new List<Cmd>();
           List<Cmd> ssDone = new List<Cmd>();
@@ -639,11 +552,11 @@ namespace Microsoft.Boogie {
           List<Cmd> predCmds = theSimpleCmds;
 
           for (; ifcmd != null; ifcmd = ifcmd.elseIf) {
-            var a = FreshAnon();
-            string thenLabel = prefix + a + "_Then";
+            string thenLabel = prefix + anon + "_Then";
             Contract.Assert(thenLabel != null);
-            string elseLabel = prefix + a + "_Else";
+            string elseLabel = prefix + anon + "_Else";
             Contract.Assert(elseLabel != null);
+            anon++;
 
             List<Cmd> ssThen = new List<Cmd>();
             List<Cmd> ssElse = new List<Cmd>();
@@ -731,30 +644,15 @@ namespace Microsoft.Boogie {
 
   [ContractClass(typeof(StructuredCmdContracts))]
   public abstract class StructuredCmd {
-    private IToken/*!*/ _tok;
-
-    public IToken/*!*/ tok
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<IToken>() != null);
-        return this._tok;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._tok = value;
-      }
-    }
-
+    public IToken/*!*/ tok;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._tok != null);
+      Contract.Invariant(tok != null);
     }
 
     public StructuredCmd(IToken tok) {
       Contract.Requires(tok != null);
-      this._tok = tok;
+      this.tok = tok;
     }
 
     public abstract void Emit(TokenTextWriter/*!*/ stream, int level);
@@ -772,58 +670,16 @@ namespace Microsoft.Boogie {
 
   public class IfCmd : StructuredCmd {
     public Expr Guard;
-
-    private StmtList/*!*/ _thn;
-    
-    public StmtList/*!*/ thn
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<StmtList>() != null);
-        return this._thn;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._thn = value;
-      }
-    }
-
-    private IfCmd _elseIf;
-
-    public IfCmd elseIf
-    {
-      get
-      {
-        return this._elseIf;
-      }
-      set
-      {
-        Contract.Requires(value == null || this.elseBlock == null);
-        this._elseIf = value;
-      }
-    }
-
-    private StmtList _elseBlock;
-
-    public StmtList elseBlock
-    {
-      get
-      {
-        return this._elseBlock;
-      }
-      set
-      {
-        Contract.Requires(value == null || this.elseIf == null);
-        this._elseBlock = value;
-      }
-    }
-
+    public StmtList/*!*/ thn;
+    public IfCmd elseIf;
+    public StmtList elseBlock;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._thn != null);
-      Contract.Invariant(this._elseIf == null || this._elseBlock == null);
+      Contract.Invariant(thn != null);
+      Contract.Invariant(elseIf == null || elseBlock == null);
     }
+
+
 
     public IfCmd(IToken/*!*/ tok, Expr guard, StmtList/*!*/ thn, IfCmd elseIf, StmtList elseBlock)
       : base(tok) {
@@ -831,9 +687,9 @@ namespace Microsoft.Boogie {
       Contract.Requires(thn != null);
       Contract.Requires(elseIf == null || elseBlock == null);
       this.Guard = guard;
-      this._thn = thn;
-      this._elseIf = elseIf;
-      this._elseBlock = elseBlock;
+      this.thn = thn;
+      this.elseIf = elseIf;
+      this.elseBlock = elseBlock;
     }
 
     public override void Emit(TokenTextWriter stream, int level) {
@@ -937,44 +793,12 @@ namespace Microsoft.Boogie {
   //---------------------------------------------------------------------
   // Block
   public sealed class Block : Absy {
-    private string/*!*/ label; // Note, Label is mostly readonly, but it can change to the name of a nearby block during block coalescing and empty-block removal
-
-    public string/*!*/ Label
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this.label;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this.label = value;
-      }
-    }
-
+    public string/*!*/ Label;  // Note, Label is mostly readonly, but it can change to the name of a nearby block during block coalescing and empty-block removal
     [Rep]
     [ElementsPeer]
-    public List<Cmd>/*!*/ cmds;
-
-    public List<Cmd>/*!*/ Cmds
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<List<Cmd>>() != null);
-        return this.cmds;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this.cmds = value;
-      }
-    }
-
+    public List<Cmd>/*!*/ Cmds;
     [Rep]  //PM: needed to verify Traverse.Visit
     public TransferCmd TransferCmd; // maybe null only because we allow deferred initialization (necessary for cyclic structures)
-
-    public byte[] Checksum;
 
     // Abstract interpretation
 
@@ -997,33 +821,12 @@ namespace Microsoft.Boogie {
     // This field is used during passification to null-out entries in block2Incartion hashtable early
     public int succCount;
 
-    private HashSet<Variable/*!*/> _liveVarsBefore;
-
-    public IEnumerable<Variable/*!*/> liveVarsBefore
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<Variable/*!*/>>(), true));
-        if (this._liveVarsBefore == null)
-          return null;
-        else
-          return this._liveVarsBefore.AsEnumerable<Variable>();
-      }
-      set
-      {
-        Contract.Requires(cce.NonNullElements(value, true));
-        if (value == null)
-          this._liveVarsBefore = null;
-        else
-          this._liveVarsBefore = new HashSet<Variable>(value);
-      }
-    }
-
+    public HashSet<Variable/*!*/> liveVarsBefore;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this.label != null);
-      Contract.Invariant(this.cmds != null);
-      Contract.Invariant(cce.NonNullElements(this._liveVarsBefore, true));
+      Contract.Invariant(Label != null);
+      Contract.Invariant(Cmds != null);
+      Contract.Invariant(cce.NonNullElements(liveVarsBefore, true));
     }
 
     public bool IsLive(Variable v) {
@@ -1043,11 +846,11 @@ namespace Microsoft.Boogie {
       Contract.Requires(label != null);
       Contract.Requires(cmds != null);
       Contract.Requires(tok != null);
-      this.label = label;
-      this.cmds = cmds;
+      this.Label = label;
+      this.Cmds = cmds;
       this.TransferCmd = transferCmd;
       this.Predecessors = new List<Block>();
-      this._liveVarsBefore = null;
+      this.liveVarsBefore = null;
       this.TraversingStatus = VisitState.ToVisit;
       this.iterations = 0;
     }
@@ -1134,124 +937,8 @@ namespace Microsoft.Boogie {
       throw new NotImplementedException();
     }
   }
-
-  public static class ChecksumHelper
-  {
-    public static void ComputeChecksums(Cmd cmd, Implementation impl, ISet<Variable> usedVariables, byte[] currentChecksum = null)
-    {
-      if (CommandLineOptions.Clo.VerifySnapshots < 2)
-      {
-        return;
-      }
-
-      if (cmd.IrrelevantForChecksumComputation)
-      {
-        cmd.Checksum = currentChecksum;
-        return;
-      }
-
-      var assumeCmd = cmd as AssumeCmd;
-      if (assumeCmd != null
-          && QKeyValue.FindBoolAttribute(assumeCmd.Attributes, "assumption_variable_initialization"))
-      {
-        // Ignore assumption variable initializations.
-        assumeCmd.Checksum = currentChecksum;
-        return;
-      }
-
-      using (var strWr = new System.IO.StringWriter())
-      using (var tokTxtWr = new TokenTextWriter("<no file>", strWr, false, false))
-      {
-        tokTxtWr.UseForComputingChecksums = true;
-        var havocCmd = cmd as HavocCmd;
-        if (havocCmd != null)
-        {
-          tokTxtWr.Write("havoc ");
-          var relevantVars = havocCmd.Vars.Where(e => usedVariables.Contains(e.Decl) && !e.Decl.Name.StartsWith("a##cached##")).OrderBy(e => e.Name).ToList();
-          relevantVars.Emit(tokTxtWr, true);
-          tokTxtWr.WriteLine(";");
-        }
-        else
-        {
-          cmd.Emit(tokTxtWr, 0);
-        }
-        var md5 = System.Security.Cryptography.MD5.Create();
-        var str = strWr.ToString();
-        if (str.Any())
-        {
-          var data = System.Text.Encoding.UTF8.GetBytes(str);
-          var checksum = md5.ComputeHash(data);
-          currentChecksum = currentChecksum != null ? CombineChecksums(currentChecksum, checksum) : checksum;
-        }
-        cmd.Checksum = currentChecksum;
-      }
-
-      var assertCmd = cmd as AssertCmd;
-      if (assertCmd != null && assertCmd.Checksum != null)
-      {
-        var assertRequiresCmd = assertCmd as AssertRequiresCmd;
-        if (assertRequiresCmd != null)
-        {
-          impl.AddAssertionChecksum(assertRequiresCmd.Checksum);
-          impl.AddAssertionChecksum(assertRequiresCmd.Call.Checksum);
-          assertRequiresCmd.SugaredCmdChecksum = assertRequiresCmd.Call.Checksum;
-        }
-        else
-        {
-          impl.AddAssertionChecksum(assertCmd.Checksum);
-        }
-      }
-
-      var sugaredCmd = cmd as SugaredCmd;
-      if (sugaredCmd != null)
-      {
-        // The checksum of a sugared command should not depend on the desugaring itself.
-        var stateCmd = sugaredCmd.Desugaring as StateCmd;
-        if (stateCmd != null)
-        {
-          foreach (var c in stateCmd.Cmds)
-          {
-            ComputeChecksums(c, impl, usedVariables, currentChecksum);
-            currentChecksum = c.Checksum;
-            if (c.SugaredCmdChecksum == null)
-            {
-              c.SugaredCmdChecksum = cmd.Checksum;
-            }
-          }
-        }
-        else
-        {
-          ComputeChecksums(sugaredCmd.Desugaring, impl, usedVariables, currentChecksum);
-        }
-      }
-    }
-
-    public static byte[] CombineChecksums(byte[] first, byte[] second, bool unordered = false)
-    {
-      Contract.Requires(first != null && (second == null || first.Length == second.Length));
-
-      var result = (byte[])(first.Clone());
-      for (int i = 0; second != null && i < second.Length; i++)
-      {
-        if (unordered)
-        {
-          result[i] += second[i];
-        }
-        else
-        {
-          result[i] = (byte)(result[i] * 31 ^ second[i]);
-        }
-      }
-      return result;
-    }
-  }
-
   [ContractClass(typeof(CmdContracts))]
   public abstract class Cmd : Absy {
-    public byte[] Checksum { get; internal set; }
-    public byte[] SugaredCmdChecksum { get; internal set; }
-    public bool IrrelevantForChecksumComputation { get; set; }
-
     public Cmd(IToken/*!*/ tok)
       : base(tok) {
       Contract.Assert(tok != null);
@@ -1270,19 +957,9 @@ namespace Microsoft.Boogie {
             {
                 tc.Error(this, "command assigns to an immutable variable: {0}", v.Name);
             }
-            else if (!CommandLineOptions.Clo.DoModSetAnalysis && v is GlobalVariable)
+            else if (!CommandLineOptions.Clo.DoModSetAnalysis && v is GlobalVariable && !tc.InFrame(v))
             {
-                if (tc.Yields) {
-                    // a yielding procedure is allowed to modify any global variable
-                }
-                else if (tc.Frame == null)
-                {
-                    tc.Error(this, "update to a global variable allowed only inside an atomic action of a yielding procedure");
-                }
-                else if (!tc.InFrame(v))
-                {
-                    tc.Error(this, "command assigns to a global variable that is not in the enclosing procedure's modifies clause: {0}", v.Name);
-                }
+                tc.Error(this, "command assigns to a global variable that is not in the enclosing procedure's modifies clause: {0}", v.Name);
             }
         }
     }
@@ -1359,9 +1036,6 @@ namespace Microsoft.Boogie {
     /// </summary>
     public static void EmitAttributes(TokenTextWriter stream, QKeyValue attributes) {
       Contract.Requires(stream != null);
-
-      if (stream.UseForComputingChecksums) { return; }
-
       for (QKeyValue kv = attributes; kv != null; kv = kv.Next) {
         kv.Emit(stream);
         stream.Write(" ");
@@ -1385,7 +1059,7 @@ namespace Microsoft.Boogie {
     {
       Contract.Ensures(Contract.Result<string>() != null);
       System.IO.StringWriter buffer = new System.IO.StringWriter();
-      using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/ false , /*pretty=*/ false)) {
+      using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, false)) {
         this.Emit(stream, 0);
       }
       return buffer.ToString();
@@ -1440,8 +1114,7 @@ namespace Microsoft.Boogie {
       Comment = c;
     }
     public override void Emit(TokenTextWriter stream, int level) {
-      if (stream.UseForComputingChecksums) { return; }
-
+      
       if (this.Comment.Contains("\n")) {
         stream.WriteLine(this, level, "/* {0} */", this.Comment);
       } else {
@@ -1468,67 +1141,26 @@ namespace Microsoft.Boogie {
   // class for parallel assignments, which subsumes both the old
   // SimpleAssignCmd and the old MapAssignCmd
   public class AssignCmd : Cmd {
-    private List<AssignLhs/*!*/>/*!*/ _lhss;
-
-    public IList<AssignLhs/*!*/>/*!*/ Lhss {
-      get {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IList<AssignLhs>>()));
-        Contract.Ensures(Contract.Result<IList<AssignLhs>>().IsReadOnly);
-        return this._lhss.AsReadOnly();
-      }
-      set {
-        Contract.Requires(cce.NonNullElements(value));
-        this._lhss = new List<AssignLhs>(value);
-      }
-    }
-
-    internal void SetLhs(int index, AssignLhs lhs)
-    {
-      Contract.Requires(0 <= index && index < this.Lhss.Count);
-      Contract.Requires(lhs != null);
-      Contract.Ensures(this.Lhss[index] == lhs);
-      this._lhss[index] = lhs;
-    }
-
-    private List<Expr/*!*/>/*!*/ _rhss;
-
-    public IList<Expr/*!*/>/*!*/ Rhss {
-      get {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IList<Expr>>()));
-        Contract.Ensures(Contract.Result<IList<Expr>>().IsReadOnly);
-        return this._rhss.AsReadOnly();
-      }
-      set {
-        Contract.Requires(cce.NonNullElements(value));
-        this._rhss = new List<Expr>(value);
-      }
-    }
-
-    internal void SetRhs(int index, Expr rhs)
-    {
-      Contract.Requires(0 <= index && index < this.Rhss.Count);
-      Contract.Requires(rhs != null);
-      Contract.Ensures(this.Rhss[index] == rhs);
-      this._rhss[index] = rhs;
-    }
-
+    public List<AssignLhs/*!*/>/*!*/ Lhss;
+    public List<Expr/*!*/>/*!*/ Rhss;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(cce.NonNullElements(this._lhss));
-      Contract.Invariant(cce.NonNullElements(this._rhss));
+      Contract.Invariant(cce.NonNullElements(Lhss));
+      Contract.Invariant(cce.NonNullElements(Rhss));
     }
 
 
-    public AssignCmd(IToken tok, IList<AssignLhs/*!*/>/*!*/ lhss, IList<Expr/*!*/>/*!*/ rhss)
+    public AssignCmd(IToken tok, List<AssignLhs/*!*/>/*!*/ lhss, List<Expr/*!*/>/*!*/ rhss)
       : base(tok) {
       Contract.Requires(tok != null);
       Contract.Requires(cce.NonNullElements(rhss));
       Contract.Requires(cce.NonNullElements(lhss));
-      this._lhss = new List<AssignLhs>(lhss);
-      this._rhss = new List<Expr>(rhss);
+      Lhss = lhss;
+      Rhss = rhss;
     }
 
     public override void Emit(TokenTextWriter stream, int level) {
+      
       stream.Write(this, level, "");
 
       string/*!*/ sep = "";
@@ -1576,31 +1208,6 @@ namespace Microsoft.Boogie {
             rc.Error(Lhss[j],
                      "variable {0} is assigned more than once in parallel assignment",
                      Lhss[j].DeepAssignedVariable);
-        }
-      }
-
-      for (int i = 0; i < Lhss.Count; i++)
-      {
-        var lhs = Lhss[i].AsExpr as IdentifierExpr;
-        if (lhs != null && lhs.Decl != null && QKeyValue.FindBoolAttribute(lhs.Decl.Attributes, "assumption"))
-        {
-          var rhs = Rhss[i] as NAryExpr;
-          if (rhs == null
-              || !(rhs.Fun is BinaryOperator)
-              || ((BinaryOperator)(rhs.Fun)).Op != BinaryOperator.Opcode.And
-              || !(rhs.Args[0] is IdentifierExpr)
-              || ((IdentifierExpr)(rhs.Args[0])).Name != lhs.Name)
-          {
-            rc.Error(tok, string.Format("RHS of assignment to assumption variable {0} must match expression \"{0} && <boolean expression>\"", lhs.Name));
-          }
-          else if (rc.HasVariableBeenAssigned(lhs.Decl.Name))
-          {
-            rc.Error(tok, "assumption variable may not be assigned to more than once");
-          }
-          else
-          {
-            rc.MarkVariableAsAssigned(lhs.Decl.Name);
-          }
         }
       }
     }
@@ -1927,43 +1534,20 @@ namespace Microsoft.Boogie {
   public class StateCmd : Cmd {
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._locals != null);
-      Contract.Invariant(this._cmds != null);
+      Contract.Invariant(Locals != null);
+      Contract.Invariant(Cmds != null);
     }
 
-    private List<Variable> _locals;
-
-    public /*readonly, except for the StandardVisitor*/ List<Variable>/*!*/ Locals {
-      get {
-        Contract.Ensures(Contract.Result<List<Variable>>() != null);
-        return this._locals;
-      }
-      internal set {
-        Contract.Requires(value != null);
-        this._locals = value;
-      }
-    }
-
-    private List<Cmd> _cmds;
-
-    public /*readonly, except for the StandardVisitor*/ List<Cmd>/*!*/ Cmds {
-      get {
-        Contract.Ensures(Contract.Result<List<Cmd>>() != null);
-        return this._cmds;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._cmds = value;
-      }
-    }
+    public /*readonly, except for the StandardVisitor*/ List<Variable>/*!*/ Locals;
+    public /*readonly, except for the StandardVisitor*/ List<Cmd>/*!*/ Cmds;
 
     public StateCmd(IToken tok, List<Variable>/*!*/ locals, List<Cmd>/*!*/ cmds)
       : base(tok) {
       Contract.Requires(locals != null);
       Contract.Requires(cmds != null);
       Contract.Requires(tok != null);
-      this._locals = locals;
-      this._cmds = cmds;
+      this.Locals = locals;
+      this.Cmds = cmds;
     }
 
     public override void Resolve(ResolutionContext rc) {
@@ -2031,7 +1615,7 @@ namespace Microsoft.Boogie {
   [ContractClass(typeof(SugaredCmdContracts))]
   abstract public class SugaredCmd : Cmd {
     private Cmd desugaring;  // null until desugared
-    
+
     public SugaredCmd(IToken/*!*/ tok)
       : base(tok) {
       Contract.Requires(tok != null);
@@ -2047,49 +1631,11 @@ namespace Microsoft.Boogie {
         return desugaring;
       }
     }
-    /// <summary>
-    /// This method invokes "visitor.Visit" on the desugaring, and then updates the
-    /// desugaring to the result thereof.  The method's intended use is for subclasses
-    /// of StandardVisitor that need to also visit the desugaring.  Note, since the
-    /// "desugaring" field is updated, this is not an appropriate method to be called
-    /// be a ReadOnlyVisitor; such visitors should instead just call
-    /// visitor.Visit(sugaredCmd.Desugaring).
-    /// </summary>
-    public void VisitDesugaring(StandardVisitor visitor) {
-      Contract.Requires(visitor != null && !(visitor is ReadOnlyVisitor));
-      if (desugaring != null) {
-        desugaring = (Cmd)visitor.Visit(desugaring);
-      }
-    }
     protected abstract Cmd/*!*/ ComputeDesugaring();
-
-    public void ExtendDesugaring(IEnumerable<Cmd> before, IEnumerable<Cmd> beforePreconditionCheck, IEnumerable<Cmd> after)
-    {
-      var desug = Desugaring;
-      var stCmd = desug as StateCmd;
-      if (stCmd != null)
-      {
-        stCmd.Cmds.InsertRange(0, before);
-        var idx = stCmd.Cmds.FindIndex(c => c is AssertCmd || c is HavocCmd || c is AssumeCmd);
-        if (idx < 0)
-        {
-          idx = 0;
-        }
-        stCmd.Cmds.InsertRange(idx, beforePreconditionCheck);
-        stCmd.Cmds.AddRange(after);
-      }
-      else if (desug != null)
-      {
-        var cmds = new List<Cmd>(before);
-        cmds.Add(desug);
-        cmds.AddRange(after);
-        desugaring = new StateCmd(Token.NoToken, new List<Variable>(), cmds);
-      }
-    }
 
     public override void Emit(TokenTextWriter stream, int level) {
       //Contract.Requires(stream != null);
-      if (CommandLineOptions.Clo.PrintDesugarings && !stream.UseForComputingChecksums) {
+      if (CommandLineOptions.Clo.PrintDesugarings) {
         stream.WriteLine(this, level, "/*** desugaring:");
         Desugaring.Emit(stream, level);
         stream.WriteLine(level, "**** end desugaring */");
@@ -2108,8 +1654,8 @@ namespace Microsoft.Boogie {
     }
   }
 
-  public abstract class CallCommonality : SugaredCmd, ICarriesAttributes {
-    public QKeyValue Attributes { get; set; }
+  public abstract class CallCommonality : SugaredCmd {
+    public QKeyValue Attributes;
 
     private bool isFree = false;
     public bool IsFree {
@@ -2147,7 +1693,7 @@ namespace Microsoft.Boogie {
     }
 
     // We have to give the type explicitly, because the type of the formal "likeThisOne" can contain type variables
-    protected Variable CreateTemporaryVariable(List<Variable> tempVars, Variable likeThisOne, Type ty, TempVarKind kind, ref int uniqueId) {
+    protected Variable CreateTemporaryVariable(List<Variable> tempVars, Variable likeThisOne, Type ty, TempVarKind kind) {
       Contract.Requires(ty != null);
       Contract.Requires(likeThisOne != null);
       Contract.Requires(tempVars != null);
@@ -2169,10 +1715,7 @@ namespace Microsoft.Boogie {
           }  // unexpected kind
       }
       TypedIdent ti = likeThisOne.TypedIdent;
-      // KLM: uniqueId was messing up FixedPointVC for unknown reason.
-      // I reverted this change for FixedPointVC only.
-      int id = CommandLineOptions.Clo.FixedPointEngine != null ? UniqueId : (uniqueId++);
-      TypedIdent newTi = new TypedIdent(ti.tok, "call" + id + tempNamePrefix + ti.Name, ty);
+      TypedIdent newTi = new TypedIdent(ti.tok, "call" + UniqueId + tempNamePrefix + ti.Name, ty);
       Variable/*!*/ v;
       if (kind == TempVarKind.Bound) {
         v = new BoundVariable(likeThisOne.tok, newTi);
@@ -2184,7 +1727,7 @@ namespace Microsoft.Boogie {
     }
   }
 
-  public class ParCallCmd : CallCommonality, IPotentialErrorNode<object, object>
+  public class ParCallCmd : CallCommonality, IPotentialErrorNode
   {
       public List<CallCmd> CallCmds;
       public ParCallCmd(IToken tok, List<CallCmd> callCmds)
@@ -2247,9 +1790,13 @@ namespace Microsoft.Boogie {
               }
               foreach (CallCmd callCmd in CallCmds)
               {
-                  if (!QKeyValue.FindBoolAttribute(callCmd.Proc.Attributes, CivlAttributes.YIELDS))
+                  if (!QKeyValue.FindBoolAttribute(callCmd.Proc.Attributes, "yields"))
                   {
                       tc.Error(callCmd, "target procedure of a parallel call must yield");
+                  }
+                  if (!QKeyValue.FindBoolAttribute(callCmd.Proc.Attributes, "stable"))
+                  {
+                      tc.Error(callCmd, "target procedure of a parallel call must be stable");
                   }
               }
           }
@@ -2273,11 +1820,9 @@ namespace Microsoft.Boogie {
       }
   }
 
-  public class CallCmd : CallCommonality, IPotentialErrorNode<object, object>
-  {
+  public class CallCmd : CallCommonality, IPotentialErrorNode {
     public string/*!*/ callee { get; set; }
     public Procedure Proc;
-    public LocalVariable AssignedAssumptionVariable;
 
     // Element of the following lists can be null, which means that
     // the call happens with * as these parameters
@@ -2463,12 +2008,6 @@ namespace Microsoft.Boogie {
       } finally {
         rc.TypeBinderState = previousTypeBinderState;
       }
-
-      var id = QKeyValue.FindStringAttribute(Attributes, "id");
-      if (id != null)
-      {
-        rc.AddStatementId(tok, id);
-      }
     }
 
     public override void AddAssignedVariables(List<Variable> vars) {
@@ -2483,10 +2022,6 @@ namespace Microsoft.Boogie {
       foreach (IdentifierExpr/*!*/ e in this.Proc.Modifies) {
         Contract.Assert(e != null);
         vars.Add(e.Decl);
-      }
-      if (AssignedAssumptionVariable != null)
-      {
-        vars.Add(AssignedAssumptionVariable);
       }
     }
 
@@ -2546,9 +2081,13 @@ namespace Microsoft.Boogie {
             {
                 tc.Error(this, "enclosing procedure of an async call must yield");
             }
-            if (!QKeyValue.FindBoolAttribute(Proc.Attributes, CivlAttributes.YIELDS))
+            if (!QKeyValue.FindBoolAttribute(Proc.Attributes, "yields"))
             {
                 tc.Error(this, "target procedure of an async call must yield");
+            }
+            if (!QKeyValue.FindBoolAttribute(Proc.Attributes, "stable"))
+            {
+                tc.Error(this, "target procedure of an async call must be stable");
             }
         }
     }
@@ -2566,8 +2105,6 @@ namespace Microsoft.Boogie {
 
     protected override Cmd ComputeDesugaring() {
       Contract.Ensures(Contract.Result<Cmd>() != null);
-
-      int uniqueId = 0;
       List<Cmd> newBlockBody = new List<Cmd>();
       Dictionary<Variable, Expr> substMap = new Dictionary<Variable, Expr>();
       Dictionary<Variable, Expr> substMapOld = new Dictionary<Variable, Expr>();
@@ -2608,13 +2145,13 @@ namespace Microsoft.Boogie {
           actualType = cce.NonNull(cce.NonNull(Ins[i]).Type);
 
         Variable cin = CreateTemporaryVariable(tempVars, param, actualType,
-                                               TempVarKind.Formal, ref uniqueId);
+                                               TempVarKind.Formal);
         cins.Add(cin);
         IdentifierExpr ie = new IdentifierExpr(cin.tok, cin);
         substMap.Add(param, ie);
         if (isWildcard) {
           cin = CreateTemporaryVariable(tempVars, param,
-                                        actualType, TempVarKind.Bound, ref uniqueId);
+                                        actualType, TempVarKind.Bound);
           wildcardVars.Add(cin);
           ie = new IdentifierExpr(cin.tok, cin);
         }
@@ -2657,13 +2194,6 @@ namespace Microsoft.Boogie {
             reqCopy.Condition = Substituter.Apply(s, req.Condition);
             AssertCmd/*!*/ a = new AssertRequiresCmd(this, reqCopy);
             Contract.Assert(a != null);
-            if (Attributes != null)
-            {
-              // Inherit attributes of call.
-              var attrCopy = (QKeyValue)cce.NonNull(Attributes.Clone());
-              attrCopy = Substituter.Apply(s, attrCopy);
-              a.Attributes = attrCopy;
-            }
             a.ErrorDataEnhanced = reqCopy.ErrorDataEnhanced;
             newBlockBody.Add(a);
           }
@@ -2684,13 +2214,6 @@ namespace Microsoft.Boogie {
         Contract.Assert(expr != null);
         AssertCmd/*!*/ a = new AssertCmd(tok, expr);
         Contract.Assert(a != null);
-        if (Attributes != null)
-        {
-          // Inherit attributes of call.
-          var attrCopy = (QKeyValue)cce.NonNull(Attributes.Clone());
-          attrCopy = Substituter.Apply(s, attrCopy);
-          a.Attributes = attrCopy;
-        }
         a.ErrorDataEnhanced = AssertCmd.GenerateBoundVarMiningStrategy(expr);
         newBlockBody.Add(a);
       }
@@ -2719,7 +2242,7 @@ namespace Microsoft.Boogie {
         Contract.Assert(f != null);
         Contract.Assume(f.Decl != null);
         Contract.Assert(f.Type != null);
-        Variable v = CreateTemporaryVariable(tempVars, f.Decl, f.Type, TempVarKind.Old, ref uniqueId);
+        Variable v = CreateTemporaryVariable(tempVars, f.Decl, f.Type, TempVarKind.Old);
         IdentifierExpr v_exp = new IdentifierExpr(v.tok, v);
         substMapOld.Add(f.Decl, v_exp);  // this assumes no duplicates in this.Proc.Modifies
         AssignCmd assign = Cmd.SimpleAssign(f.tok, v_exp, f);
@@ -2745,7 +2268,7 @@ namespace Microsoft.Boogie {
           actualType = cce.NonNull(cce.NonNull(Outs[i]).Type);
 
         Variable cout = CreateTemporaryVariable(tempVars, param, actualType,
-                                                TempVarKind.Formal, ref uniqueId);
+                                                TempVarKind.Formal);
         couts.Add(cout);
         IdentifierExpr ie = new IdentifierExpr(cout.tok, cout);
         substMap.Add(param, ie);
@@ -2772,11 +2295,11 @@ namespace Microsoft.Boogie {
       #endregion
 
       #region assume Post[ins, outs, old(frame) := cins, couts, cframe]
-      calleeSubstitution = Substituter.SubstitutionFromHashtable(substMap, true, Proc);
-      calleeSubstitutionOld = Substituter.SubstitutionFromHashtable(substMapOld, true, Proc);
+      Substitution s2 = Substituter.SubstitutionFromHashtable(substMap);
+      Substitution s2old = Substituter.SubstitutionFromHashtable(substMapOld);
       foreach (Ensures/*!*/ e in this.Proc.Ensures) {
         Contract.Assert(e != null);
-        Expr copy = Substituter.ApplyReplacingOldExprs(calleeSubstitution, calleeSubstitutionOld, e.Condition);
+        Expr copy = Substituter.ApplyReplacingOldExprs(s2, s2old, e.Condition);
         AssumeCmd assume = new AssumeCmd(this.tok, copy);
         #region stratified inlining support
         if (QKeyValue.FindBoolAttribute(e.Attributes, "si_fcall"))
@@ -2786,7 +2309,7 @@ namespace Microsoft.Boogie {
         if (QKeyValue.FindBoolAttribute(e.Attributes, "candidate"))
         {
             assume.Attributes = new QKeyValue(Token.NoToken, "candidate", new List<object>(), assume.Attributes);
-            assume.Attributes.AddParam(this.callee);
+            assume.Attributes.Params.Add(this.callee);
         }
         #endregion
         newBlockBody.Add(assume);
@@ -2809,62 +2332,6 @@ namespace Microsoft.Boogie {
       return new StateCmd(this.tok, tempVars, newBlockBody);
     }
 
-    class NameEqualityComparer : EqualityComparer<IdentifierExpr>
-    {
-      public override bool Equals(IdentifierExpr x, IdentifierExpr y)
-      {
-        return x.Name.Equals(y.Name);
-      }
-
-      public override int GetHashCode(IdentifierExpr obj)
-      {
-        return obj.Name.GetHashCode();
-      }
-    }
-
-    NameEqualityComparer comparer = new NameEqualityComparer();
-
-    public Substitution calleeSubstitution;
-    public Substitution calleeSubstitutionOld;
-
-    public IEnumerable<IdentifierExpr> UnmodifiedBefore(Procedure oldProcedure)
-    {
-      Contract.Requires(oldProcedure != null);
-
-      return Proc.Modifies.Except(oldProcedure.Modifies, comparer).Select(e => new IdentifierExpr(Token.NoToken, e.Decl));
-    }
-
-    public IEnumerable<IdentifierExpr> ModifiedBefore(Procedure oldProcedure)
-    {
-      Contract.Requires(oldProcedure != null);
-
-      return oldProcedure.Modifies.Except(Proc.Modifies, comparer).Select(e => new IdentifierExpr(Token.NoToken, e.Decl));
-    }
-
-    public Expr Postcondition(Procedure procedure, List<Expr> modifies, Dictionary<Variable, Expr> oldSubst, Program program, Func<Expr, Expr> extract)
-    {
-      Contract.Requires(calleeSubstitution != null && calleeSubstitutionOld != null && modifies != null && oldSubst != null && program != null && extract != null);
-
-      Substitution substOldCombined = v => { Expr s; if (oldSubst.TryGetValue(v, out s)) { return s; } return calleeSubstitutionOld(v); };
-
-      var clauses = procedure.Ensures.Select(e => Substituter.FunctionCallReresolvingApplyReplacingOldExprs(calleeSubstitution, substOldCombined, e.Condition, program)).Concat(modifies);
-      // TODO(wuestholz): Try extracting a function for each clause:
-      // return Conjunction(clauses.Select(c => extract(c)));
-      var conj = Expr.And(clauses, true);
-      return conj != null ? extract(conj) : conj;
-    }
-
-    public Expr CheckedPrecondition(Procedure procedure, Program program, Func<Expr, Expr> extract)
-    {
-      Contract.Requires(calleeSubstitution != null && calleeSubstitutionOld != null && program != null && extract != null);
-
-      var clauses = procedure.Requires.Where(r => !r.Free).Select(r => Substituter.FunctionCallReresolvingApplyReplacingOldExprs(calleeSubstitution, calleeSubstitutionOld, r.Condition, program));
-      // TODO(wuestholz): Try extracting a function for each clause:
-      // return Conjunction(clauses.Select(c => extract(c)));
-      var conj = Expr.And(clauses, true);
-      return conj != null ? extract(conj) : conj;
-    }
-
     public override Absy StdDispatch(StandardVisitor visitor) {
       //Contract.Requires(visitor != null);
       Contract.Ensures(Contract.Result<Absy>() != null);
@@ -2872,8 +2339,8 @@ namespace Microsoft.Boogie {
     }
   }
 
-  public abstract class PredicateCmd : Cmd, ICarriesAttributes {
-    public QKeyValue Attributes { get; set; }
+  public abstract class PredicateCmd : Cmd {
+    public QKeyValue Attributes;
     public /*readonly--except in StandardVisitor*/ Expr/*!*/ Expr;
     [ContractInvariantMethod]
     void ObjectInvariant() {
@@ -2896,12 +2363,6 @@ namespace Microsoft.Boogie {
     public override void Resolve(ResolutionContext rc) {
       //Contract.Requires(rc != null);
       Expr.Resolve(rc);
-
-      var id = QKeyValue.FindStringAttribute(Attributes, "id");
-      if (id != null)
-      {
-        rc.AddStatementId(tok, id);
-      }
     }
     public override void AddAssignedVariables(List<Variable> vars) {
       //Contract.Requires(vars != null);
@@ -2914,104 +2375,40 @@ namespace Microsoft.Boogie {
   }
 
   public class ListOfMiningStrategies : MiningStrategy {
-
-    private List<MiningStrategy>/*!*/ _msList;
-
-    public List<MiningStrategy>/*!*/ msList
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<List<MiningStrategy>>() != null);
-        return this._msList;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._msList = value;
-      }
-    }
-
+    public List<MiningStrategy>/*!*/ msList;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._msList != null);
+      Contract.Invariant(msList != null);
     }
+
 
     public ListOfMiningStrategies(List<MiningStrategy> l) {
       Contract.Requires(l != null);
-      this._msList = l;
+      this.msList = l;
     }
   }
 
   public class EEDTemplate : MiningStrategy {
-    private string/*!*/ _reason;
-    public string/*!*/ reason
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this._reason;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._reason = value;
-      }
-    }
-    
-    private List<Expr/*!*/>/*!*/ exprList;
-    public IEnumerable<Expr> Expressions
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<Expr>>()));
-        return this.exprList.AsReadOnly();
-      }
-      set
-      {
-        Contract.Requires(cce.NonNullElements(value));
-        this.exprList = new List<Expr>(value);
-      }
-    }
-
-
+    public string/*!*/ reason;
+    public List<Expr/*!*/>/*!*/ exprList;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._reason != null);
-      Contract.Invariant(cce.NonNullElements(this.exprList));
+      Contract.Invariant(reason != null);
+      Contract.Invariant(cce.NonNullElements(exprList));
     }
+
 
     public EEDTemplate(string reason, List<Expr/*!*/>/*!*/ exprList) {
       Contract.Requires(reason != null);
       Contract.Requires(cce.NonNullElements(exprList));
-      this._reason = reason;
+      this.reason = reason;
       this.exprList = exprList;
     }
   }
 
-  public class AssertCmd : PredicateCmd, IPotentialErrorNode<object, object>
-  {
+  public class AssertCmd : PredicateCmd, IPotentialErrorNode {
     public Expr OrigExpr;
     public Dictionary<Variable, Expr> IncarnationMap;
-
-    Expr verifiedUnder;
-    public Expr VerifiedUnder
-    {
-      get
-      {
-        if (verifiedUnder != null)
-        {
-          return verifiedUnder;
-        }
-        verifiedUnder = QKeyValue.FindExprAttribute(Attributes, "verified_under");
-        return verifiedUnder;
-      }
-    }
-
-    public void MarkAsVerifiedUnder(Expr expr)
-    {
-      Attributes = new QKeyValue(tok, "verified_under", new List<object> { expr }, Attributes);
-      verifiedUnder = expr;
-    }
 
     // TODO: convert to use generics
     private object errorData;
@@ -3218,14 +2615,8 @@ namespace Microsoft.Boogie {
       this.Expr.Emit(stream);
       stream.WriteLine(";");
     }
-    public override void Resolve(ResolutionContext rc) {
-      //Contract.Requires(rc != null);
-      ResolveAttributes(Attributes, rc);
-      base.Resolve(rc);
-    }
     public override void Typecheck(TypecheckingContext tc) {
       //Contract.Requires(tc != null);
-      TypecheckAttributes(Attributes, tc);
       Expr.Typecheck(tc);
       Contract.Assert(Expr.Type != null);  // follows from Expr.Typecheck postcondition
       if (!Expr.Type.Unify(Type.Bool)) {
@@ -3280,31 +2671,18 @@ namespace Microsoft.Boogie {
   }
 
   public class HavocCmd : Cmd {
-    private List<IdentifierExpr>/*!*/ _vars;
-
-    public List<IdentifierExpr>/*!*/ Vars {
-      get {
-        Contract.Ensures(Contract.Result<List<IdentifierExpr>>() != null);
-        return this._vars;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._vars = value;
-      }
-    }
-
+    public List<IdentifierExpr>/*!*/ Vars;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._vars != null);
+      Contract.Invariant(Vars != null);
     }
 
     public HavocCmd(IToken/*!*/ tok, List<IdentifierExpr>/*!*/ vars)
       : base(tok) {
       Contract.Requires(tok != null);
       Contract.Requires(vars != null);
-      this._vars = vars;
+      Vars = vars;
     }
-
     public override void Emit(TokenTextWriter stream, int level) {
       //Contract.Requires(stream != null);
       stream.Write(this, level, "havoc ");
@@ -3353,16 +2731,6 @@ namespace Microsoft.Boogie {
     public override void Typecheck(TypecheckingContext tc) {
       //Contract.Requires(tc != null);
       // nothing to typecheck
-    }
-
-    public override string ToString()
-    {
-        Contract.Ensures(Contract.Result<string>() != null);
-        System.IO.StringWriter buffer = new System.IO.StringWriter();
-        using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/ false , /*pretty=*/ false)) {
-            this.Emit(stream, 0);
-        }
-        return buffer.ToString();
     }
   }
   [ContractClassFor(typeof(TransferCmd))]

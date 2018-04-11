@@ -120,7 +120,8 @@ namespace Microsoft.Boogie.AbstractInterpretation
       // procedures.
 
       return program
-            .Implementations
+            .TopLevelDeclarations
+            .Where(d => d is Implementation).Select(i => (Implementation)i)
             .GroupBy(i => i.Proc).Select(g => g.ToArray()).ToDictionary(a => a[0].Proc);
     }
 
@@ -136,13 +137,17 @@ namespace Microsoft.Boogie.AbstractInterpretation
       // Differently stated, it is the \alpha from axioms (i.e. first order formulae) to the underlyng abstract domain
       var initialElement = lattice.Top;
       Contract.Assert(initialElement != null);
-      foreach (var ax in program.Axioms) {
-        initialElement = lattice.Constrain(initialElement, ax.Expr);
+      foreach (var decl in program.TopLevelDeclarations) {
+        var ax = decl as Axiom;
+        if (ax != null) {
+          initialElement = lattice.Constrain(initialElement, ax.Expr);
+        }
       }
 
       // analyze each procedure
-      foreach (var proc in program.Procedures) {
-        if (procedureImplementations.ContainsKey(proc)) {
+      foreach (var decl in program.TopLevelDeclarations) {
+        var proc = decl as Procedure;
+        if (proc != null && procedureImplementations.ContainsKey(proc)) {
           // analyze each implementation of the procedure
           foreach (var impl in procedureImplementations[proc]) {
             // add the precondition to the axioms

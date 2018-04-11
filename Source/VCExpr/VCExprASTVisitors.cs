@@ -68,16 +68,6 @@ namespace Microsoft.Boogie.VCExprAST {
     Result VisitLabelOp(VCExprNAry node, Arg arg);
     Result VisitSelectOp(VCExprNAry node, Arg arg);
     Result VisitStoreOp(VCExprNAry node, Arg arg);
-    Result VisitFloatAddOp(VCExprNAry node, Arg arg);
-    Result VisitFloatSubOp(VCExprNAry node, Arg arg);
-    Result VisitFloatMulOp(VCExprNAry node, Arg arg);
-    Result VisitFloatDivOp(VCExprNAry node, Arg arg);
-    Result VisitFloatLeqOp(VCExprNAry node, Arg arg);
-    Result VisitFloatLtOp(VCExprNAry node, Arg arg);
-    Result VisitFloatGeqOp(VCExprNAry node, Arg arg);
-    Result VisitFloatGtOp(VCExprNAry node, Arg arg);
-    Result VisitFloatEqOp(VCExprNAry node, Arg arg);
-    Result VisitFloatNeqOp(VCExprNAry node, Arg arg);
     Result VisitBvOp(VCExprNAry node, Arg arg);
     Result VisitBvExtractOp(VCExprNAry node, Arg arg);
     Result VisitBvConcatOp(VCExprNAry node, Arg arg);
@@ -150,65 +140,6 @@ namespace Microsoft.Boogie.VCExprAST {
     }
 
     public Result VisitStoreOp(VCExprNAry node, Arg arg) {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatAddOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatSubOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatMulOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatDivOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatLeqOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatLtOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatGeqOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatGtOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatEqOp(VCExprNAry node, Arg arg)
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
-    public Result VisitFloatNeqOp(VCExprNAry node, Arg arg) {
       Contract.Requires(node != null);
       throw new NotImplementedException();
     }
@@ -303,12 +234,6 @@ namespace Microsoft.Boogie.VCExprAST {
       throw new NotImplementedException();
     }
 
-    public Result VisitToFloat(VCExprNAry node, Arg arg) //TODO: modify later
-    {
-      Contract.Requires(node != null);
-      throw new NotImplementedException();
-    }
-
     public Result VisitBoogieFunctionOp(VCExprNAry node, Arg arg) {
       Contract.Requires(node != null);
       throw new NotImplementedException();
@@ -363,15 +288,14 @@ namespace Microsoft.Boogie.VCExprAST {
            node.Op == VCExpressionGenerator.ImpliesOp)) {
         Contract.Assert(node.Op != null);
         VCExprOp op = node.Op;
-        HashSet<VCExprOp> ops = new HashSet<VCExprOp>();
-        ops.Add(VCExpressionGenerator.AndOp);
-        ops.Add(VCExpressionGenerator.OrOp);
-        ops.Add(VCExpressionGenerator.ImpliesOp);
-        IEnumerator enumerator = new VCExprNAryMultiUniformOpEnumerator(node, ops);
+
+        IEnumerator enumerator = new VCExprNAryUniformOpEnumerator(node);
+        enumerator.MoveNext();  // skip the node itself
+
         while (enumerator.MoveNext()) {
-          VCExpr expr = cce.NonNull((VCExpr)enumerator.Current);
+          VCExpr/*!*/ expr = cce.NonNull((VCExpr/*!*/)enumerator.Current);
           VCExprNAry naryExpr = expr as VCExprNAry;
-          if (naryExpr == null || !ops.Contains(naryExpr.Op)) {
+          if (naryExpr == null || !naryExpr.Op.Equals(op)) {
             expr.Accept(this, arg);
           } else {
             StandardResult(expr, arg);
@@ -507,28 +431,6 @@ namespace Microsoft.Boogie.VCExprAST {
         // (those are too interesting ...)
              expr.TypeParamArity == 0;
     }
-  }
-
-  public class VCExprNAryMultiUniformOpEnumerator : VCExprNAryEnumerator
-  {
-      private readonly HashSet<VCExprOp> Ops;
-      [ContractInvariantMethod]
-      void ObjectInvariant()
-      {
-          Contract.Invariant(Ops != null);
-      }
-
-      public VCExprNAryMultiUniformOpEnumerator(VCExprNAry completeExpr, HashSet<VCExprOp> ops)
-          : base(completeExpr)
-      {
-          Contract.Requires(completeExpr != null);
-
-          this.Ops = ops;
-      }
-      protected override bool Descend(VCExprNAry expr)
-      {
-          return Ops.Contains(expr.Op) && expr.TypeParamArity == 0;
-      }
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -934,14 +836,11 @@ namespace Microsoft.Boogie.VCExprAST {
         NAryExprTodoStack.Push(exprTodo[i]);
     }
 
-    public virtual bool AvoidVisit(VCExprNAry node, Arg arg)
-    {
-        return true;
-    }
-
     public virtual VCExpr Visit(VCExprNAry node, Arg arg) {
       //Contract.Requires(node != null);
       Contract.Ensures(Contract.Result<VCExpr>() != null);
+      VCExprOp/*!*/ op = node.Op;
+      Contract.Assert(op != null);
       int initialStackSize = NAryExprTodoStack.Count;
       int initialResultStackSize = NAryExprResultStack.Count;
 
@@ -952,10 +851,10 @@ namespace Microsoft.Boogie.VCExprAST {
         Contract.Assert(subExpr != null);
 
         if (Object.ReferenceEquals(subExpr, CombineResultsMarker)) {
+          //
           // assemble a result
           VCExprNAry/*!*/ originalExpr = (VCExprNAry)NAryExprTodoStack.Pop();
           Contract.Assert(originalExpr != null);
-          VCExprOp/*!*/ op = originalExpr.Op;
           bool changed = false;
           List<VCExpr/*!*/>/*!*/ newSubExprs = new List<VCExpr/*!*/>();
 
@@ -971,8 +870,8 @@ namespace Microsoft.Boogie.VCExprAST {
           //
         } else {
           //
-            VCExprNAry narySubExpr = subExpr as VCExprNAry;
-          if (narySubExpr != null && this.AvoidVisit(narySubExpr, arg) &&
+          VCExprNAry narySubExpr = subExpr as VCExprNAry;
+          if (narySubExpr != null && narySubExpr.Op.Equals(op) &&
             // as in VCExprNAryUniformOpEnumerator, all expressions with
             // type parameters are allowed to be inspected more closely
               narySubExpr.TypeParamArity == 0) {
@@ -1513,54 +1412,6 @@ namespace Microsoft.Boogie.VCExprAST {
       //Contract.Requires(node != null);
       return StandardResult(node, arg);
     }
-    public virtual Result VisitFloatAddOp(VCExprNAry node, Arg arg) {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatSubOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatMulOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatDivOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatLeqOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatLtOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatGeqOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatGtOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatEqOp(VCExprNAry node, Arg arg)
-    {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitFloatNeqOp(VCExprNAry node, Arg arg) {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
     public virtual Result VisitBvOp(VCExprNAry node, Arg arg) {
       //Contract.Requires(node != null);
       return StandardResult(node, arg);
@@ -1638,11 +1489,6 @@ namespace Microsoft.Boogie.VCExprAST {
       return StandardResult(node, arg);
     }
     public virtual Result VisitToRealOp(VCExprNAry node, Arg arg) {
-      //Contract.Requires(node != null);
-      return StandardResult(node, arg);
-    }
-    public virtual Result VisitToFloatOp(VCExprNAry node, Arg arg)
-    {
       //Contract.Requires(node != null);
       return StandardResult(node, arg);
     }

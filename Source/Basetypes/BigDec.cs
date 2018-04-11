@@ -6,7 +6,6 @@
 using System;
 using System.Text;
 using System.Diagnostics.Contracts;
-using System.Diagnostics;
 
 
 namespace Microsoft.Basetypes {
@@ -49,11 +48,6 @@ namespace Microsoft.Basetypes {
     }
 
     [Pure]
-    public static BigDec FromBigInt(BIM v) {
-      return new BigDec(v, 0);
-    }
-
-    [Pure]
     public static BigDec FromString(string v) {
       if (v == null) throw new FormatException();
 
@@ -89,12 +83,7 @@ namespace Microsoft.Basetypes {
         }
       }
 
-      if (integral.Sign == -1) {
-        return new BigDec(integral - fraction, exponent);
-      }
-      else {
-        return new BigDec(integral + fraction, exponent);
-      }
+      return new BigDec(integral + fraction, exponent);
     }
 
     internal BigDec(BIM mantissa, int exponent) {
@@ -142,39 +131,31 @@ namespace Microsoft.Basetypes {
     ////////////////////////////////////////////////////////////////////////////
     // Conversion operations
 
-    // ``floor`` rounds towards negative infinity (like SMT-LIBv2's to_int).
-    /// <summary>
-    /// Computes the floor and ceiling of this BigDec. Note the choice of rounding towards negative
-    /// infinity rather than zero for floor is because SMT-LIBv2's to_int function floors this way.
-    /// </summary>
-    /// <param name="floor">The Floor (rounded towards negative infinity)</param>
-    /// <param name="ceiling">Ceiling (rounded towards positive infinity)</param>
-    public void FloorCeiling(out BIM floor, out BIM ceiling) {
+    [Pure]
+    public BIM Floor(BIM? minimum, BIM? maximum) {
       BIM n = this.mantissa;
-      int e = this.exponent;
-      if (n.IsZero) {
-        floor = ceiling = n;
-      } else if (0 <= e) {
-        // it's an integer
-        for (; 0 < e; e--) {
+      
+      if (this.exponent >= 0) {
+        int e = this.exponent;
+        while (e > 0 && (minimum == null || minimum <= n) && (maximum == null || n <= maximum)) {
           n = n * ten;
-        }
-        floor = ceiling = n;
-      } else {
-        // it's a non-zero integer, so the ceiling is one more than the floor
-        for (; e < 0 && !n.IsZero; e++) {
-          n = n / ten;  // Division rounds towards negative infinity
-        }
-
-        if (this.mantissa >= 0) {
-          floor = n;
-          ceiling = n + 1;
-        } else {
-          ceiling = n;
-          floor = n - 1;
+          e = e - 1;
         }
       }
-      Debug.Assert(floor <= ceiling, "Invariant was not maintained");
+      else {
+        int e = -this.exponent;
+        while (e > 0 && !n.IsZero) {
+          n = n / ten;
+          e = e - 1;
+        }
+      }
+
+      if (minimum != null && n < minimum)
+        return (BIM)minimum;
+      else if (maximum != null && maximum < n)
+        return (BIM)maximum;
+      else
+        return n;
     }
 
     [Pure]
@@ -208,54 +189,6 @@ namespace Microsoft.Basetypes {
         else {
           int fracDigits = Math.Min(maxDigits, digits);
           return String.Format("0.{0}{1}", new string('0', exp - fracDigits), s.Substring(0, fracDigits));
-        }
-      }
-    }
-
-    [Pure]
-    public string ToDecimalString() {
-      string m = this.mantissa.ToString();
-      var e = this.exponent;
-      if (0 <= this.exponent) {
-        return m + Zeros(e) + ".0";
-      } else {
-        e = -e;
-        // compute k to be the longest suffix of m consisting of all zeros (but no longer than e, and not the entire string)
-        var maxK = e < m.Length ? e : m.Length - 1;
-        var last = m.Length - 1;
-        var k = 0;
-        while (k < maxK && m[last - k] == '0') {
-          k++;
-        }
-        if (0 < k) {
-          // chop off the suffix of k zeros from m and adjust e accordingly
-          m = m.Substring(0, m.Length - k);
-          e -= k;
-        }
-        if (e == 0) {
-          return m;
-        } else if (e < m.Length) {
-          var n = m.Length - e;
-          return m.Substring(0, n) + "." + m.Substring(n);
-        } else {
-          return "0." + Zeros(e - m.Length) + m;
-        }
-      }
-    }
-
-    [Pure]
-    public static string Zeros(int n) {
-      Contract.Requires(0 <= n);
-      if (n <= 10) {
-        var tenZeros = "0000000000";
-        return tenZeros.Substring(0, n);
-      } else {
-        var d = n / 2;
-        var s = Zeros(d);
-        if (n % 2 == 0) {
-          return s + s;
-        } else {
-          return s + s + "0";
         }
       }
     }

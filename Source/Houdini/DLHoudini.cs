@@ -6,7 +6,7 @@ using System.Text;
 using Microsoft.Boogie;
 using Microsoft.Boogie.VCExprAST;
 using VC;
-using Outcome = VC.VCGen.Outcome;
+//using Outcome = VC.VCGen.Outcome;
 using Bpl = Microsoft.Boogie;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
@@ -25,7 +25,7 @@ namespace Microsoft.Boogie.Houdini {
             model = null;
         }
 
-        public override void OnModel(IList<string> labels, Model model,  Outcome proverOutcome)
+        public override void OnModel(IList<string> labels, Model model, ProverInterface.Outcome proverOutcome)
         {
             Debug.Assert(model != null);
             if(CommandLineOptions.Clo.PrintErrorModel >= 1) model.Write(Console.Out);
@@ -507,6 +507,7 @@ namespace Microsoft.Boogie.Houdini {
                 #region vcgen
 
                 var gen = prover.VCExprGen;
+                /*
                 var terms = new List<Expr>();
                 foreach (var tup in impl2FuncCalls[impl])
                 {
@@ -527,15 +528,8 @@ namespace Microsoft.Boogie.Houdini {
                             term);
                     }
                     terms.Add(term);
-
-                    /*
-                    foreach (var variable in varList)
-                    {
-                        terms.Add(Expr.Le(variable, Expr.Literal(10)));
-                        terms.Add(Expr.Ge(variable, Expr.Literal(-10)));
-                    }
-                    */
                 }
+                */
 
                 //var env = BinaryTreeAnd(terms, 0, terms.Count - 1);
                 //env.Typecheck(new TypecheckingContext((IErrorSink)null));
@@ -553,7 +547,8 @@ namespace Microsoft.Boogie.Houdini {
 
                 #endregion vcgen
 
-                VCExpr finalVC;
+                VCExpr finalVC = impl2VC[impl];
+
                 bool hasIntegerVariable = true;
 
                 for (int i = 0; i <= 1; i++)
@@ -569,11 +564,11 @@ namespace Microsoft.Boogie.Houdini {
 
                     var start = DateTime.Now;
 
-                    //prover.Push();
-                    //prover.Assert(gen.Not(finalVC), true);
-                    //prover.FlushAxiomsToTheoremProver();
-                    //prover.Check();
-                    //ProverInterface.Outcome proverOutcome = prover.CheckOutcomeCore(handler);
+                    prover.Push();
+                    prover.Assert(gen.Not(finalVC), true);
+                    prover.FlushAxiomsToTheoremProver();
+                    prover.Check();
+                    ProverInterface.Outcome proverOutcome = prover.CheckOutcomeCore(handler);
 
                     var inc = (DateTime.Now - start);
                     proverTime += inc;
@@ -622,12 +617,11 @@ namespace Microsoft.Boogie.Houdini {
                        */
 
                         // propagate dependent guys back into the worklist, including self
-                        var deps = new HashSet<string>();
-                        deps.Add(impl);
-                        funcsChanged.Iter(f => deps.UnionWith(function2implAssumed[f]));
-                        funcsChanged.Iter(f => deps.UnionWith(function2implAsserted[f]));
-
-                        deps.Iter(s => worklist.Add(Tuple.Create(impl2Priority[s], s)));
+                        //var deps = new HashSet<string>();
+                        //deps.Add(impl);
+                        //funcsChanged.Iter(f => deps.UnionWith(function2implAssumed[f]));
+                        //funcsChanged.Iter(f => deps.UnionWith(function2implAsserted[f]));
+                        //deps.Iter(s => worklist.Add(Tuple.Create(impl2Priority[s], s)));
                          
 
                         // break out of the loop that iterates over various bounds.
@@ -733,7 +727,7 @@ namespace Microsoft.Boogie.Houdini {
             Debug.Assert(failingAssert != null);
 
             // extract the lhs of the returned tuple from the AssumeCmds
-            /*
+            
             List<Tuple<string, List<Model.Element>>> lhs = new List<Tuple<string, List<Model.Element>>>();
             foreach (var cmd in error.AssumedCmds) 
             {
@@ -741,7 +735,7 @@ namespace Microsoft.Boogie.Houdini {
                 Debug.Assert(assumeCmd != null);
                 lhs.AddRange(P_ExtractState(impl, assumeCmd.Expr, error.Model));
             }
-            */
+            
 
             List<Tuple<string, List<Model.Element>>> rhs = new List<Tuple<string, List<Model.Element>>>();
             rhs = P_ExtractState(impl, failingAssert.Expr, error.Model);
@@ -878,7 +872,7 @@ namespace Microsoft.Boogie.Houdini {
                 be = Substituter.Apply(new Substitution(v => formalToConstant.ContainsKey(v.Name) ? Expr.Ident(formalToConstant[v.Name]) : Expr.Ident(v)), be);
                 formalToConstant.Values.Iter(v => prover.Context.DeclareConstant(v, false, null));
 
-                var reporter = new MLHoudiniErrorReporter();
+                var reporter = new DLHoudiniErrorReporter();
                 var ve = prover.Context.BoogieExprTranslator.Translate(be);
                 prover.Assert(ve, true);
                 prover.Check();

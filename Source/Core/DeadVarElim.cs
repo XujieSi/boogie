@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.Boogie.GraphUtil;
 using System.Diagnostics.Contracts;
 
@@ -28,35 +27,31 @@ namespace Microsoft.Boogie {
       List<Variable>/*!*/ vars = new List<Variable>();
       foreach (Variable/*!*/ var in impl.LocVars) {
         Contract.Assert(var != null);
-        if (_usedVars.Contains(var))
+        if (usedVars.Contains(var))
           vars.Add(var);
       }
       impl.LocVars = vars;
       //Console.WriteLine("New number of local variables = {0}", impl.LocVars.Length);
       //Console.WriteLine("---------------------------------");
-      _usedVars.Clear();
+      usedVars.Clear();
       return impl;
     }
   }
 
-  public class ModSetCollector : ReadOnlyVisitor {
-    private Procedure enclosingProc;
-    private Dictionary<Procedure/*!*/, HashSet<Variable/*!*/>/*!*/>/*!*/ modSets;
-    private HashSet<Procedure> yieldingProcs;
+  public class ModSetCollector : StandardVisitor {
+    static Procedure enclosingProc;
+    static Dictionary<Procedure/*!*/, HashSet<Variable/*!*/>/*!*/>/*!*/ modSets;
+    static HashSet<Procedure> yieldingProcs;
+    static HashSet<Procedure> asyncAndParallelCallTargetProcs;
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(cce.NonNullDictionaryAndValues(modSets));
       Contract.Invariant(Contract.ForAll(modSets.Values, v => cce.NonNullElements(v)));
     }
 
-    public ModSetCollector() {
-      modSets = new Dictionary<Procedure/*!*/, HashSet<Variable/*!*/>/*!*/>();
-      yieldingProcs = new HashSet<Procedure>();
-    }
+    static bool moreProcessingRequired;
 
-    private bool moreProcessingRequired;
-
-    public void DoModSetAnalysis(Program program) {
+    public static void DoModSetAnalysis(Program program) {
       Contract.Requires(program != null);
 
       if (CommandLineOptions.Clo.Trace)
@@ -73,32 +68,45 @@ namespace Microsoft.Boogie {
 //          Console.WriteLine("Number of procedures = {0}", procCount);*/
       }
 
+      modSets = new Dictionary<Procedure/*!*/, HashSet<Variable/*!*/>/*!*/>();
+      yieldingProcs = new HashSet<Procedure>();
+      asyncAndParallelCallTargetProcs = new HashSet<Procedure>();
+
       HashSet<Procedure/*!*/> implementedProcs = new HashSet<Procedure/*!*/>();
-      foreach (var impl in program.Implementations) {
-        if (impl.Proc != null)
-          implementedProcs.Add(impl.Proc);
-      }
-      foreach (var proc in program.Procedures) {
-        if (!implementedProcs.Contains(proc))
-        {
-            enclosingProc = proc;
-            foreach (var expr in proc.Modifies)
-            {
-                Contract.Assert(expr != null);
-                ProcessVariable(expr.Decl);
-            }
-            enclosingProc = null;
+      foreach (Declaration/*!*/ decl in program.TopLevelDeclarations) {
+        Contract.Assert(decl != null);
+        if (decl is Implementation) {
+          Implementation impl = (Implementation)decl;
+          if (impl.Proc != null)
+            implementedProcs.Add(impl.Proc);
         }
-        else
+      }
+      foreach (Declaration/*!*/ decl in program.TopLevelDeclarations) {
+        Contract.Assert(decl != null);
+        if (decl is Procedure)
         {
-            modSets.Add(proc, new HashSet<Variable>());
+            if (!implementedProcs.Contains(cce.NonNull((Procedure)decl)))
+            {
+                enclosingProc = (Procedure)decl;
+                foreach (IdentifierExpr/*!*/ expr in enclosingProc.Modifies)
+                {
+                    Contract.Assert(expr != null);
+                    ProcessVariable(expr.Decl);
+                }
+                enclosingProc = null;
+            }
+            else
+            {
+                modSets.Add(decl as Procedure, new HashSet<Variable>());
+            }
         }
       }
 
       moreProcessingRequired = true;
       while (moreProcessingRequired) {
         moreProcessingRequired = false;
-        this.Visit(program);
+        ModSetCollector modSetCollector = new ModSetCollector();
+        modSetCollector.Visit(program);
       }
 
       foreach (Procedure x in modSets.Keys)
@@ -111,29 +119,39 @@ namespace Microsoft.Boogie {
       }
       foreach (Procedure x in yieldingProcs)
       {
-          if (!QKeyValue.FindBoolAttribute(x.Attributes, CivlAttributes.YIELDS))
+          if (!QKeyValue.FindBoolAttribute(x.Attributes, "yields"))
           {
-              x.AddAttribute(CivlAttributes.YIELDS);
+              x.AddAttribute("yields");
+          }
+      }
+      foreach (Procedure x in asyncAndParallelCallTargetProcs)
+      {
+          if (!QKeyValue.FindBoolAttribute(x.Attributes, "stable"))
+          {
+              x.AddAttribute("stable");
           }
       }
 
-#if DEBUG_PRINT
-      Console.WriteLine("Number of procedures with nonempty modsets = {0}", modSets.Keys.Count);
-      foreach (Procedure/*!*/ x in modSets.Keys) {
-        Contract.Assert(x != null);
-        Console.Write("{0} : ", x.Name);
-        bool first = true;
-        foreach (Variable/*!*/ y in modSets[x]) {
-          Contract.Assert(y != null);
-          if (first)
-            first = false;
-          else
-            Console.Write(", ");
-          Console.Write("{0}", y.Name);
-        }
-        Console.WriteLine("");
+      if (false /*CommandLineOptions.Clo.Trace*/)      {
+
+          Console.WriteLine("Number of procedures with nonempty modsets = {0}", modSets.Keys.Count);
+          foreach (Procedure/*!*/ x in modSets.Keys)
+          {
+              Contract.Assert(x != null);
+              Console.Write("{0} : ", x.Name);
+              bool first = true;
+              foreach (Variable/*!*/ y in modSets[x])
+              {
+                  Contract.Assert(y != null);
+                  if (first)
+                      first = false;
+                  else
+                      Console.Write(", ");
+                  Console.Write("{0}", y.Name);
+              }
+              Console.WriteLine("");
+          }
       }
-#endif
     }
 
     public override Implementation VisitImplementation(Implementation node) {
@@ -198,6 +216,7 @@ namespace Microsoft.Boogie {
       }
       if (callCmd.IsAsync)
       {
+          asyncAndParallelCallTargetProcs.Add(callCmd.Proc);
           if (!yieldingProcs.Contains(callCmd.Proc))
           {
               yieldingProcs.Add(callCmd.Proc);
@@ -218,6 +237,7 @@ namespace Microsoft.Boogie {
         }
         foreach (CallCmd callCmd in node.CallCmds)
         {
+            asyncAndParallelCallTargetProcs.Add(callCmd.Proc);
             if (!yieldingProcs.Contains(callCmd.Proc))
             {
                 yieldingProcs.Add(callCmd.Proc);
@@ -226,7 +246,7 @@ namespace Microsoft.Boogie {
         }
         return ret;
     }
-    private void ProcessVariable(Variable var) {
+    private static void ProcessVariable(Variable var) {
       Procedure/*!*/ localProc = cce.NonNull(enclosingProc);
       if (var == null)
         return;
@@ -247,62 +267,20 @@ namespace Microsoft.Boogie {
     }
   }
 
-  public class MutableVariableCollector : ReadOnlyVisitor
-  {
-    public HashSet<Variable> UsedVariables = new HashSet<Variable>();
-    
-    public void AddUsedVariables(HashSet<Variable> usedVariables)
-    {
-      Contract.Requires(usedVariables != null);
-
-      foreach (var v in usedVariables)
-      {
-        UsedVariables.Add(v);
-      }
-    }
-
-    public override Expr VisitIdentifierExpr(IdentifierExpr node)
-    {
-      Contract.Ensures(Contract.Result<Expr>() != null);
-
-      if (node.Decl != null && node.Decl.IsMutable)
-      {
-        UsedVariables.Add(node.Decl);
-      }
-      return base.VisitIdentifierExpr(node);
-    }
-  }
-
-  public class VariableCollector : ReadOnlyVisitor {
-    protected HashSet<Variable/*!*/>/*!*/ _usedVars;
-    public IEnumerable<Variable /*!*/>/*!*/ usedVars
-    {
-      get
-      {
-        return _usedVars.AsEnumerable();
-      }
-    }
-
-    protected HashSet<Variable/*!*/>/*!*/ _oldVarsUsed;
-    public IEnumerable<Variable /*!*/>/*!*/ oldVarsUsed
-    {
-      get
-      {
-        return _oldVarsUsed.AsEnumerable();
-      }
-    }
-
+  public class VariableCollector : StandardVisitor {
+    public HashSet<Variable/*!*/>/*!*/ usedVars;
+    public HashSet<Variable/*!*/>/*!*/ oldVarsUsed;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(cce.NonNullElements(_usedVars));
-      Contract.Invariant(cce.NonNullElements(_oldVarsUsed));
+      Contract.Invariant(cce.NonNullElements(usedVars));
+      Contract.Invariant(cce.NonNullElements(oldVarsUsed));
     }
 
     int insideOldExpr;
 
     public VariableCollector() {
-      _usedVars = new System.Collections.Generic.HashSet<Variable/*!*/>();
-      _oldVarsUsed = new System.Collections.Generic.HashSet<Variable/*!*/>();
+      usedVars = new System.Collections.Generic.HashSet<Variable/*!*/>();
+      oldVarsUsed = new System.Collections.Generic.HashSet<Variable/*!*/>();
       insideOldExpr = 0;
     }
 
@@ -319,23 +297,16 @@ namespace Microsoft.Boogie {
       //Contract.Requires(node != null);
       Contract.Ensures(Contract.Result<Expr>() != null);
       if (node.Decl != null) {
-        _usedVars.Add(node.Decl);
+        usedVars.Add(node.Decl);
         if (insideOldExpr > 0) {
-          _oldVarsUsed.Add(node.Decl);
+          oldVarsUsed.Add(node.Decl);
         }
       }
       return node;
     }
-
-    public static IEnumerable<Variable> Collect(Absy node)
-    {
-      var collector = new VariableCollector();
-      collector.Visit(node);
-      return collector.usedVars;
-    }
   }
 
-  public class BlockCoalescer : ReadOnlyVisitor {
+  public class BlockCoalescer : StandardVisitor {
     public static void CoalesceBlocks(Program program) {
       Contract.Requires(program != null);
       BlockCoalescer blockCoalescer = new BlockCoalescer();
@@ -431,16 +402,7 @@ namespace Microsoft.Boogie {
         }
       }
       impl.Blocks = newBlocks;
-      foreach (Block b in impl.Blocks)
-      {
-          if (b.TransferCmd is ReturnCmd) continue;
-          GotoCmd gotoCmd = b.TransferCmd as GotoCmd;
-          gotoCmd.labelNames = new List<string>();
-          foreach (Block succ in gotoCmd.labelTargets)
-          {
-              gotoCmd.labelNames.Add(succ.Label);
-          }
-      }
+
       // Console.WriteLine("Final number of blocks = {0}", impl.Blocks.Count);
       return impl;
     }
@@ -480,13 +442,6 @@ namespace Microsoft.Boogie {
       foreach (Block/*!*/ block in sortedNodes) {
         Contract.Assert(block != null);
         HashSet<Variable/*!*/>/*!*/ liveVarsAfter = new HashSet<Variable/*!*/>();
-
-        // The injected assumption variables should always be considered to be live.
-        foreach (var v in impl.InjectedAssumptionVariables.Concat(impl.DoomedInjectedAssumptionVariables))
-        {
-          liveVarsAfter.Add(v);
-        }
-
         if (block.TransferCmd is GotoCmd) {
           GotoCmd gotoCmd = (GotoCmd)block.TransferCmd;
           if (gotoCmd.labelTargets != null) {
@@ -555,7 +510,7 @@ namespace Microsoft.Boogie {
         HavocCmd/*!*/ havocCmd = (HavocCmd)cmd;
         foreach (IdentifierExpr/*!*/ expr in havocCmd.Vars) {
           Contract.Assert(expr != null);
-          if (expr.Decl != null && !(QKeyValue.FindBoolAttribute(expr.Decl.Attributes, "assumption") && expr.Decl.Name.StartsWith("a##cached##"))) {
+          if (expr.Decl != null) {
             liveSet.Remove(expr.Decl);
           }
         }
@@ -767,7 +722,7 @@ namespace Microsoft.Boogie {
     public Implementation/*!*/ impl;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(cce.NonNullElements(graph.Nodes));
+      Contract.Invariant(cce.NonNullElements(graph.TopologicalSort()));
       Contract.Invariant(cce.NonNullDictionaryAndValues(procsCalled));
       Contract.Invariant(cce.NonNullElements(nodes));
       Contract.Invariant(cce.NonNullDictionaryAndValues(succEdges));
@@ -937,7 +892,7 @@ namespace Microsoft.Boogie {
       Contract.Invariant(cce.NonNullDictionaryAndValues(name2Proc));
       Contract.Invariant(cce.NonNullDictionaryAndValues(callers) &&
         Contract.ForAll(callers.Values, v => cce.NonNullElements(v)));
-      Contract.Invariant(cce.NonNullElements(callGraph.Nodes));
+      Contract.Invariant(cce.NonNullElements(callGraph.TopologicalSort()));
       Contract.Invariant(procPriority != null);
       Contract.Invariant(cce.NonNullDictionaryAndValues(varsLiveAtEntry));
       Contract.Invariant(cce.NonNullDictionaryAndValues(varsLiveAtExit) &&
@@ -967,7 +922,7 @@ namespace Microsoft.Boogie {
       varsLiveAtEntry.Clear();
       varsLiveSummary.Clear();
 
-      foreach (var decl in program.TopLevelDeclarations) {
+      foreach (Declaration/*!*/ decl in program.TopLevelDeclarations) {
         Contract.Assert(decl != null);
         if (decl is Implementation) {
           Implementation/*!*/ imp = (Implementation/*!*/)cce.NonNull(decl);
@@ -1045,7 +1000,7 @@ namespace Microsoft.Boogie {
       }
       // Return default: all globals and out params
       HashSet<Variable/*!*/>/*!*/ lv = new HashSet<Variable/*!*/>();
-      foreach (Variable/*!*/ v in prog.GlobalVariables) {
+      foreach (Variable/*!*/ v in prog.GlobalVariables()) {
         Contract.Assert(v != null);
         lv.Add(v);
       }
@@ -1065,7 +1020,7 @@ namespace Microsoft.Boogie {
       }
       // Return default: all globals and in params
       HashSet<Variable/*!*/>/*!*/ lv = new HashSet<Variable/*!*/>();
-      foreach (Variable/*!*/ v in prog.GlobalVariables) {
+      foreach (Variable/*!*/ v in prog.GlobalVariables()) {
         Contract.Assert(v != null);
         lv.Add(v);
       }
@@ -1333,7 +1288,7 @@ Contract.Assert(b != null);
 //Set<Variable!> lv = cfg.weightBefore[b].getLiveVars();
 b.liveVarsBefore = procICFG[mainImpl.Name].liveVarsAfter[b];
 //foreach(GlobalVariable/*!*/
-      /* v in program.GlobalVariables){Contract.Assert(v != null);
+      /* v in program.GlobalVariables()){Contract.Assert(v != null);
 //  b.liveVarsBefore.Add(v);
 //}
 }
@@ -1540,7 +1495,7 @@ b.liveVarsBefore = procICFG[mainImpl.Name].liveVarsAfter[b];
         if (predicateCmd.Expr is LiteralExpr && prog != null && impl != null) {
           LiteralExpr le = (LiteralExpr)predicateCmd.Expr;
           if (le.IsFalse) {
-            var globals = prog.GlobalVariables;
+            List<GlobalVariable/*!*/>/*!*/ globals = prog.GlobalVariables();
             Contract.Assert(cce.NonNullElements(globals));
             foreach (Variable/*!*/ v in globals) {
               Contract.Assert(v != null);
@@ -1688,82 +1643,5 @@ b.liveVarsBefore = procICFG[mainImpl.Name].liveVarsAfter[b];
       weightCacheAfterCall[cmd] = ret;
       return ret;
     }
-  }
-
-  public class TokenEliminator : ReadOnlyVisitor
-  {
-      public int TokenCount = 0;
-      public override Expr VisitExpr(Expr node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++;
-          return base.VisitExpr(node);
-      }
-      public override Variable VisitVariable(Variable node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitVariable(node);
-      }
-      public override Function VisitFunction(Function node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitFunction(node);
-      }
-      public override Implementation VisitImplementation(Implementation node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitImplementation(node);
-      }
-      public override Procedure VisitProcedure(Procedure node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitProcedure(node);
-      }
-      public override Axiom VisitAxiom(Axiom node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitAxiom(node);
-      }
-      public override Cmd VisitAssignCmd(AssignCmd node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitAssignCmd(node);
-      }
-      public override Cmd VisitAssumeCmd(AssumeCmd node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitAssumeCmd(node);
-      }
-      public override Cmd VisitHavocCmd(HavocCmd node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitHavocCmd(node);
-      }
-      public override Constant VisitConstant(Constant node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitConstant(node);
-      }
-      public override TransferCmd VisitTransferCmd(TransferCmd node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitTransferCmd(node);
-      }
-      public override Block VisitBlock(Block node)
-      {
-          node.tok = Token.NoToken;
-          TokenCount++; 
-          return base.VisitBlock(node);
-      }
   }
 }

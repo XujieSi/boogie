@@ -35,8 +35,6 @@ namespace Microsoft.Boogie {
 
     protected List<IdentifierExpr>/*!*/ newModifies;
 
-    protected string prefix;
-
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(program != null);
@@ -50,7 +48,8 @@ namespace Microsoft.Boogie {
     public override Expr VisitCodeExpr(CodeExpr node)
     {
         Inliner codeExprInliner = new Inliner(program, inlineCallback, CommandLineOptions.Clo.InlineDepth);
-        codeExprInliner.newLocalVars.AddRange(node.LocVars);
+        codeExprInliner.newLocalVars = new List<Variable>(node.LocVars);
+        codeExprInliner.newModifies = new List<IdentifierExpr>();
         codeExprInliner.inlinedProcLblMap = this.inlinedProcLblMap;
         List<Block> newCodeExprBlocks = codeExprInliner.DoInlineBlocks(node.Blocks, ref inlinedSomething);
         return new CodeExpr(codeExprInliner.newLocalVars, newCodeExprBlocks);
@@ -69,14 +68,21 @@ namespace Microsoft.Boogie {
     protected string GetInlinedProcLabel(string procName) {
       Contract.Requires(procName != null);
       Contract.Ensures(Contract.Result<string>() != null);
-      return prefix + procName + "$" + inlinedProcLblMap[procName];
+      int currentId;
+      if (!inlinedProcLblMap.TryGetValue(procName, out currentId)) {
+        currentId = 0;
+        inlinedProcLblMap.Add(procName, currentId);
+      }
+      return "inline$" + procName + "$" + currentId;
     }
 
     protected string GetProcVarName(string procName, string formalName) {
       Contract.Requires(formalName != null);
       Contract.Requires(procName != null);
       Contract.Ensures(Contract.Result<string>() != null);
-      return GetInlinedProcLabel(procName) + "$" + formalName;
+      string/*!*/ prefix = GetInlinedProcLabel(procName);
+      Contract.Assert(prefix != null);
+      return prefix + "$" + formalName;
     }
 
     public Inliner(Program program, InlineCallback cb, int inlineDepth) {
@@ -86,60 +92,14 @@ namespace Microsoft.Boogie {
       this.inlineDepth = inlineDepth;
       this.codeCopier = new CodeCopier();
       this.inlineCallback = cb;
-      this.newLocalVars = new List<Variable>();
-      this.newModifies = new List<IdentifierExpr>();
-      this.prefix = null;
     }
 
-    // This method calculates a prefix (storing it in the prefix field) so that prepending it to any string 
-    // is guaranteed not to create a conflict with the names of variables and blocks in scope inside impl.
-    protected void ComputePrefix(Program program, Implementation impl)
-    {
-        this.prefix = "inline$";
-        foreach (var v in impl.InParams)
-        {
-            DistinguishPrefix(v.Name);
-        }
-        foreach (var v in impl.OutParams)
-        {
-            DistinguishPrefix(v.Name);
-        }
-        foreach (var v in impl.LocVars)
-        {
-            DistinguishPrefix(v.Name);
-        }
-        foreach (var v in program.GlobalVariables)
-        {
-            DistinguishPrefix(v.Name);
-        }
-        foreach (Block b in impl.Blocks)
-        {
-            DistinguishPrefix(b.Label);
-        }
-    }
-
-    private void DistinguishPrefix(string s)
-    {
-        if (!s.StartsWith(prefix)) return;
-        for (int i = prefix.Length; i < s.Length; i++)
-        {
-            prefix = prefix + "$";
-            if (s[i] != '$') break;
-        }
-        if (prefix == s)
-        {
-            prefix = prefix + "$";
-        }
-    }
-
-    protected static void ProcessImplementation(Program program, Implementation impl, Inliner inliner) {
+    protected static void ProcessImplementation(Implementation impl, Inliner inliner) {
       Contract.Requires(impl != null);
       Contract.Requires(impl.Proc != null);
 
-      inliner.ComputePrefix(program, impl);
-
-      inliner.newLocalVars.AddRange(impl.LocVars);
-      inliner.newModifies.AddRange(impl.Proc.Modifies);
+      inliner.newLocalVars = new List<Variable>(impl.LocVars);
+      inliner.newModifies = new List<IdentifierExpr>(impl.Proc.Modifies);
 
       bool inlined = false;
       List<Block> newBlocks = inliner.DoInlineBlocks(impl.Blocks, ref inlined);
@@ -168,22 +128,22 @@ namespace Microsoft.Boogie {
       Contract.Requires(impl != null);
       Contract.Requires(program != null);
       Contract.Requires(impl.Proc != null);
-      ProcessImplementation(program, impl, new Inliner(program, null, CommandLineOptions.Clo.InlineDepth));
+      ProcessImplementation(impl, new Inliner(program, null, CommandLineOptions.Clo.InlineDepth));
     }
 
     public static void ProcessImplementation(Program program, Implementation impl) {
       Contract.Requires(impl != null);
       Contract.Requires(program != null);
       Contract.Requires(impl.Proc != null);
-      ProcessImplementation(program, impl, new Inliner(program, null, -1));
+      ProcessImplementation(impl, new Inliner(program, null, -1));
     }
 
     protected void EmitImpl(Implementation impl) {
       Contract.Requires(impl != null);
       Contract.Requires(impl.Proc != null);
       Console.WriteLine("after inlining procedure calls");
-      impl.Proc.Emit(new TokenTextWriter("<console>", Console.Out, /*pretty=*/ false), 0);
-      impl.Emit(new TokenTextWriter("<console>", Console.Out, /*pretty=*/ false), 0);
+      impl.Proc.Emit(new TokenTextWriter("<console>", Console.Out), 0);
+      impl.Emit(new TokenTextWriter("<console>", Console.Out), 0);
     }
 
     private sealed class DummyErrorSink : IErrorSink {
@@ -202,7 +162,7 @@ namespace Microsoft.Boogie {
       Contract.Ensures(impl.Proc != null);
       ResolutionContext rc = new ResolutionContext(new DummyErrorSink());
 
-      foreach (var decl in program.TopLevelDeclarations) {
+      foreach (Declaration decl in program.TopLevelDeclarations) {
         decl.Register(rc);
       }
 
@@ -278,7 +238,7 @@ namespace Microsoft.Boogie {
         // increment the counter for the procedure to be used in constructing the locals and formals
         NextInlinedProcLabel(impl.Proc.Name);
 
-        BeginInline(impl);
+        BeginInline(newLocalVars, newModifies, impl);
 
         List<Block/*!*/>/*!*/ inlinedBlocks = CreateInlinedBlocks(callCmd, impl, nextBlockLabel);
         Contract.Assert(cce.NonNullElements(inlinedBlocks));
@@ -425,7 +385,7 @@ namespace Microsoft.Boogie {
       return newBlocks;
     }
 
-    protected void BeginInline(Implementation impl) {
+    protected void BeginInline(List<Variable> newLocalVars, List<IdentifierExpr> newModifies, Implementation impl) {
       Contract.Requires(impl != null);
       Contract.Requires(impl.Proc != null);
       Contract.Requires(newModifies != null);
@@ -437,7 +397,6 @@ namespace Microsoft.Boogie {
       foreach (Variable/*!*/ locVar in cce.NonNull(impl.OriginalLocVars)) {
         Contract.Assert(locVar != null);
         LocalVariable localVar = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, GetProcVarName(proc.Name, locVar.Name), locVar.TypedIdent.Type, locVar.TypedIdent.WhereExpr));
-        localVar.Attributes = locVar.Attributes; // copy attributes
         newLocalVars.Add(localVar);
         IdentifierExpr ie = new IdentifierExpr(Token.NoToken, localVar);
         substMap.Add(locVar, ie);
@@ -447,7 +406,6 @@ namespace Microsoft.Boogie {
         Variable inVar = cce.NonNull(impl.InParams[i]);
         LocalVariable localVar = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, GetProcVarName(proc.Name, inVar.Name), inVar.TypedIdent.Type, inVar.TypedIdent.WhereExpr));
         newLocalVars.Add(localVar);
-        if (impl.Proc != null) localVar.Attributes = impl.Proc.InParams[i].Attributes; // copy attributes
         IdentifierExpr ie = new IdentifierExpr(Token.NoToken, localVar);
         substMap.Add(inVar, ie);
         // also add a substitution from the corresponding formal occurring in the PROCEDURE declaration
@@ -460,7 +418,6 @@ namespace Microsoft.Boogie {
       for (int i = 0; i < impl.OutParams.Count; i++) {
         Variable outVar = cce.NonNull(impl.OutParams[i]);
         LocalVariable localVar = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, GetProcVarName(proc.Name, outVar.Name), outVar.TypedIdent.Type, outVar.TypedIdent.WhereExpr));
-        if (impl.Proc != null) localVar.Attributes = impl.Proc.OutParams[i].Attributes; // copy attributes
         newLocalVars.Add(localVar);
         IdentifierExpr ie = new IdentifierExpr(Token.NoToken, localVar);
         substMap.Add(outVar, ie);
@@ -508,7 +465,7 @@ namespace Microsoft.Boogie {
     }
 
     private Cmd InlinedEnsures(CallCmd callCmd, Ensures ens) {
-      if (QKeyValue.FindBoolAttribute(ens.Attributes, "InlineAssume")) {
+      if (QKeyValue.FindBoolAttribute(ens.Attributes, "assume")) {
         return new AssumeCmd(ens.tok, codeCopier.CopyExpr(ens.Condition));
       } else if (ens.Free) {
         return new AssumeCmd(ens.tok, Expr.True); 
@@ -678,8 +635,9 @@ namespace Microsoft.Boogie {
 
     protected static Implementation FindProcImpl(Program program, Procedure proc) {
       Contract.Requires(program != null);
-      foreach (var impl in program.Implementations) {
-        if (impl.Proc == proc) {
+      foreach (Declaration decl in program.TopLevelDeclarations) {
+        Implementation impl = decl as Implementation;
+        if (impl != null && impl.Proc == proc) {
           return impl;
         }
       }

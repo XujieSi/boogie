@@ -9,8 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VC;
 using BoogiePL = Microsoft.Boogie;
-using System.Diagnostics;
-using System.Runtime.Caching;
+
 
 namespace Microsoft.Boogie
 {
@@ -106,13 +105,9 @@ namespace Microsoft.Boogie
       {
         Console.Write("{0} finished with {1} credible, {2} doomed{3}", CommandLineOptions.Clo.DescriptiveToolName, stats.VerifiedCount, stats.ErrorCount, stats.ErrorCount == 1 ? "" : "s");
       }
-      else if (CommandLineOptions.Clo.ShowVerifiedProcedureCount)
+      else
       {
         Console.Write("{0} finished with {1} verified, {2} error{3}", CommandLineOptions.Clo.DescriptiveToolName, stats.VerifiedCount, stats.ErrorCount, stats.ErrorCount == 1 ? "" : "s");
-      }
-      else 
-      {
-        Console.Write("{0} finished with {1} error{2}", CommandLineOptions.Clo.DescriptiveToolName, stats.ErrorCount, stats.ErrorCount == 1 ? "" : "s");
       }
       if (stats.InconclusiveCount != 0)
       {
@@ -125,9 +120,6 @@ namespace Microsoft.Boogie
       if (stats.OutOfMemoryCount != 0)
       {
         Console.Write(", {0} out of memory", stats.OutOfMemoryCount);
-      }
-      if (stats.OutOfResourceCount != 0) {
-        Console.Write(", {0} out of resource", stats.OutOfResourceCount);
       }
       Console.WriteLine();
       Console.Out.Flush();
@@ -142,7 +134,7 @@ namespace Microsoft.Boogie
 
       foreach (var e in errorInfo.Aux)
       {
-        if (!(skipExecutionTrace && e.Category != null && e.Category.Contains("Execution trace")))
+        if (!(skipExecutionTrace && e.Category.Contains("Execution trace")))
         {
           ReportBplError(e.Tok, e.FullMsg, false, tw);
         }
@@ -158,18 +150,25 @@ namespace Microsoft.Boogie
     {
       Contract.Requires(message != null);
 
-      if (category != null) {
+      if (category != null)
+      {
         message = string.Format("{0}: {1}", category, message);
       }
       string s;
-      if (tok != null) {
-        s = string.Format("{0}({1},{2}): {3}", ExecutionEngine.GetFileNameForConsole(tok.filename), tok.line, tok.col, message);
-      } else {
+      if (tok != null)
+      {
+        s = string.Format("{0}({1},{2}): {3}", tok.filename, tok.line, tok.col, message);
+      }
+      else
+      {
         s = message;
       }
-      if (error) {
+      if (error)
+      {
         ErrorWriteLine(tw, s);
-      } else {
+      }
+      else
+      {
         tw.WriteLine(s);
       }
     }
@@ -195,15 +194,7 @@ namespace Microsoft.Boogie
     public int VerifiedCount;
     public int InconclusiveCount;
     public int TimeoutCount;
-    public int OutOfResourceCount;
     public int OutOfMemoryCount;
-    public long[] CachingActionCounts;
-    public int CachedErrorCount;
-    public int CachedVerifiedCount;
-    public int CachedInconclusiveCount;
-    public int CachedTimeoutCount;
-    public int CachedOutOfResourceCount;
-    public int CachedOutOfMemoryCount;
   }
 
 
@@ -224,12 +215,12 @@ namespace Microsoft.Boogie
 
   public class ErrorInformationFactory
   {
-    public virtual ErrorInformation CreateErrorInformation(IToken tok, string msg, string requestId = null, string originalRequestId = null, string category = null)
+    public virtual ErrorInformation CreateErrorInformation(IToken tok, string msg, string requestId = null, string category = null)
     {
       Contract.Requires(1 <= tok.line && 1 <= tok.col);
       Contract.Requires(msg != null);
 
-      return ErrorInformation.CreateErrorInformation(tok, msg, requestId, originalRequestId, category);
+      return ErrorInformation.CreateErrorInformation(tok, msg, requestId, category);
     }
   }
 
@@ -241,7 +232,6 @@ namespace Microsoft.Boogie
     public string Category { get; set; }
     public string BoogieErrorCode { get; set; }
     public readonly List<AuxErrorInfo> Aux = new List<AuxErrorInfo>();
-    public string OriginalRequestId { get; set; }
     public string RequestId { get; set; }
     public ErrorKind Kind { get; set; }
     public string ImplementationName { get; set; }
@@ -293,11 +283,10 @@ namespace Microsoft.Boogie
       Msg = CleanUp(msg);
     }
 
-    internal static ErrorInformation CreateErrorInformation(IToken tok, string msg, string requestId = null, string originalRequestId = null, string category = null)
+    internal static ErrorInformation CreateErrorInformation(IToken tok, string msg, string requestId = null, string category = null)
     {
       var result = new ErrorInformation(tok, msg);
       result.RequestId = requestId;
-      result.OriginalRequestId = originalRequestId;
       result.Category = category;
       return result;
     }
@@ -326,14 +315,11 @@ namespace Microsoft.Boogie
   #endregion
 
 
-  public sealed class VerificationResult
+  public class VerificationResult
   {
-    public readonly string RequestId;
     public readonly string Checksum;
     public readonly string DependeciesChecksum;
-    public readonly string ImplementationName;
-    public readonly IToken ImplementationToken;
-    public readonly string ProgramId;
+    public readonly string RequestId;
 
     public DateTime Start { get; set; }
     public DateTime End { get; set; }
@@ -342,25 +328,29 @@ namespace Microsoft.Boogie
     public int ProofObligationCountBefore { get; set; }
     public int ProofObligationCountAfter { get; set; }
 
-    public ConditionGeneration.Outcome Outcome { get; set; }
+    public ConditionGeneration.Outcome Outcome;
     public List<Counterexample> Errors;
 
-    public ISet<byte[]> AssertionChecksums { get; private set; }
+    public string ImplementationName { get; set; }
+    public IToken ImplementationToken { get; set; }
 
-    public VerificationResult(string requestId, Implementation implementation, string programId = null)
+    public VerificationResult(string requestId, string checksum, string depsChecksum, ConditionGeneration.Outcome outcome, List<Counterexample> errors)
+      : this(requestId, checksum, depsChecksum)
     {
-      Checksum = implementation.Checksum;
-      DependeciesChecksum = implementation.DependencyChecksum;
+      Outcome = outcome;
+      Errors = errors;
+    }
+
+    public VerificationResult(string requestId, string checksum, string depsChecksum)
+    {
+      Checksum = checksum;
+      DependeciesChecksum = depsChecksum;
       RequestId = requestId;
-      ImplementationName = implementation.Name;
-      ImplementationToken = implementation.tok;
-      ProgramId = programId;
-      AssertionChecksums = implementation.AssertionChecksums;
     }
   }
 
 
-  public class PolymorphismChecker : ReadOnlyVisitor
+  public class PolymorphismChecker : StandardVisitor
   {
       bool isMonomorphic = true;
 
@@ -407,77 +397,55 @@ namespace Microsoft.Boogie
 
     public static ErrorInformationFactory errorInformationFactory = new ErrorInformationFactory();
 
-    static int autoRequestIdCount;
-
-    static readonly string AutoRequestIdPrefix = "auto_request_id_";
-
-    public static string FreshRequestId()
-    {
-      var id = Interlocked.Increment(ref autoRequestIdCount);
-      return AutoRequestIdPrefix + id;
-    }
-
-    public static int AutoRequestId(string id)
-    {
-      if (id.StartsWith(AutoRequestIdPrefix))
-      {
-        int result;
-        if (int.TryParse(id.Substring(AutoRequestIdPrefix.Length), out result))
-        {
-          return result;
-        }
-      }
-      return -1;
-    }
-
     public readonly static VerificationResultCache Cache = new VerificationResultCache();
-
-    static readonly MemoryCache programCache = new MemoryCache("ProgramCache");
-    static readonly CacheItemPolicy policy = new CacheItemPolicy { SlidingExpiration = new TimeSpan(0, 10, 0), Priority = CacheItemPriority.Default };
-
-    public static Program CachedProgram(string programId)
-    {
-      var result = programCache.Get(programId) as Program;
-      return result;
-    }
     
     static List<Checker> Checkers = new List<Checker>();
 
-    static DateTime FirstRequestStart;
+    static IDictionary<string, CancellationTokenSource> ImplIdToCancellationTokenSource = new ConcurrentDictionary<string, CancellationTokenSource>();
 
-    static readonly ConcurrentDictionary<string, TimeSpan> TimePerRequest = new ConcurrentDictionary<string, TimeSpan>();
-    static readonly ConcurrentDictionary<string, PipelineStatistics> StatisticsPerRequest = new ConcurrentDictionary<string, PipelineStatistics>();
+    static IDictionary<string, IList<CancellationTokenSource>> RequestIdToCancellationTokenSources = new ConcurrentDictionary<string, IList<CancellationTokenSource>>();
 
-    static readonly ConcurrentDictionary<string, CancellationTokenSource> ImplIdToCancellationTokenSource = new ConcurrentDictionary<string, CancellationTokenSource>();
 
-    static readonly ConcurrentDictionary<string, CancellationTokenSource> RequestIdToCancellationTokenSource = new ConcurrentDictionary<string, CancellationTokenSource>();
-
-    static ThreadTaskScheduler Scheduler = new ThreadTaskScheduler(16 * 1024 * 1024);
-
-    public static void ProcessFiles(List<string> fileNames, bool lookForSnapshots = true, string programId = null)
+    public static void ProcessFiles(List<string> fileNames, bool lookForSnapshots = true)
     {
       Contract.Requires(cce.NonNullElements(fileNames));
-
-      if (programId == null)
-      {
-        programId = "main_program_id";
-      }
 
       if (CommandLineOptions.Clo.VerifySeparately && 1 < fileNames.Count)
       {
         foreach (var f in fileNames)
         {
-          ProcessFiles(new List<string> { f }, lookForSnapshots, f);
+          ProcessFiles(new List<string> { f }, lookForSnapshots);
         }
         return;
       }
 
-      if (0 <= CommandLineOptions.Clo.VerifySnapshots && lookForSnapshots)
+      if (CommandLineOptions.Clo.VerifySnapshots && lookForSnapshots)
       {
-        var snapshotsByVersion = LookForSnapshots(fileNames);
+        var snapshotsByVersion = new List<List<string>>();
+        for (int version = 0; true; version++)
+        {
+          var nextSnapshot = new List<string>();
+          foreach (var name in fileNames)
+          {
+            var versionedName = name.Replace(Path.GetExtension(name), ".v" + version + Path.GetExtension(name));
+            if (File.Exists(versionedName))
+            {
+              nextSnapshot.Add(versionedName);
+            }
+          }
+          if (nextSnapshot.Any())
+          {
+            snapshotsByVersion.Add(nextSnapshot);
+          }
+          else
+          {
+            break;
+          }
+        }
+
         foreach (var s in snapshotsByVersion)
         {
-          ProcessFiles(new List<string>(s), false, programId);
+          ProcessFiles(new List<string>(s), false);
         }
         return;
       }
@@ -489,20 +457,18 @@ namespace Microsoft.Boogie
           return;
         if (CommandLineOptions.Clo.PrintFile != null)
         {
-          PrintBplFile(CommandLineOptions.Clo.PrintFile, program, false, true, CommandLineOptions.Clo.PrettyPrint);
+          PrintBplFile(CommandLineOptions.Clo.PrintFile, program, false);
         }
 
-        CivlAttributes.DesugarYieldAssert(program);
-
         LinearTypeChecker linearTypeChecker;
-        CivlTypeChecker civlTypeChecker;
-        PipelineOutcome oc = ResolveAndTypecheck(program, fileNames[fileNames.Count - 1], out linearTypeChecker, out civlTypeChecker);
+        MoverTypeChecker moverTypeChecker;
+        PipelineOutcome oc = ResolveAndTypecheck(program, fileNames[fileNames.Count - 1], out linearTypeChecker, out moverTypeChecker);
         if (oc != PipelineOutcome.ResolvedAndTypeChecked)
           return;
 
         if (CommandLineOptions.Clo.PrintCFGPrefix != null)
         {
-          foreach (var impl in program.Implementations)
+          foreach (var impl in program.TopLevelDeclarations.OfType<Implementation>())
           {
             using (StreamWriter sw = new StreamWriter(CommandLineOptions.Clo.PrintCFGPrefix + "." + impl.Name + ".dot"))
             {
@@ -511,27 +477,30 @@ namespace Microsoft.Boogie
           }
         }
 
+        EliminateDeadVariables(program);
+
+        CollectModSets(program);
+
+        CoalesceBlocks(program);
+
         if (CommandLineOptions.Clo.StratifiedInlining == 0)
         {
-          Concurrency.Transform(linearTypeChecker, civlTypeChecker);
-          (new LinearEraser()).VisitProgram(program);
-          if (CommandLineOptions.Clo.CivlDesugaredFile != null)
+          Concurrency.Transform(linearTypeChecker, moverTypeChecker);
+          var eraser = new LinearEraser();
+          eraser.VisitProgram(program);
+          if (CommandLineOptions.Clo.OwickiGriesDesugaredOutputFile != null)
           {
               int oldPrintUnstructured = CommandLineOptions.Clo.PrintUnstructured;
               CommandLineOptions.Clo.PrintUnstructured = 1;
-              PrintBplFile(CommandLineOptions.Clo.CivlDesugaredFile, program, false, false, CommandLineOptions.Clo.PrettyPrint);
+              PrintBplFile(CommandLineOptions.Clo.OwickiGriesDesugaredOutputFile, program, false, false);
               CommandLineOptions.Clo.PrintUnstructured = oldPrintUnstructured;
           }
         }
 
-        EliminateDeadVariables(program);
-
-        CoalesceBlocks(program);
-
         Inline(program);
 
         var stats = new PipelineStatistics();
-        oc = InferAndVerify(program, stats, 1 < CommandLineOptions.Clo.VerifySnapshots ? programId : null);
+        oc = InferAndVerify(program, stats, fileNames.ElementAt(0));
         switch (oc)
         {
           case PipelineOutcome.Done:
@@ -542,34 +511,6 @@ namespace Microsoft.Boogie
             break;
         }
       }
-    }
-
-    public static IList<IList<string>> LookForSnapshots(IList<string> fileNames)
-    {
-      Contract.Requires(fileNames != null);
-
-      var result = new List<IList<string>>();
-      for (int version = 0; true; version++)
-      {
-        var nextSnapshot = new List<string>();
-        foreach (var name in fileNames)
-        {
-          var versionedName = name.Replace(Path.GetExtension(name), ".v" + version + Path.GetExtension(name));
-          if (File.Exists(versionedName))
-          {
-            nextSnapshot.Add(versionedName);
-          }
-        }
-        if (nextSnapshot.Any())
-        {
-          result.Add(nextSnapshot);
-        }
-        else
-        {
-          break;
-        }
-      }
-      return result;
     }
 
 
@@ -588,7 +529,7 @@ namespace Microsoft.Boogie
     {
       if (CommandLineOptions.Clo.DoModSetAnalysis)
       {
-        new ModSetCollector().DoModSetAnalysis(program);
+        Microsoft.Boogie.ModSetCollector.DoModSetAnalysis(program);
       }
     }
 
@@ -599,7 +540,7 @@ namespace Microsoft.Boogie
     }
 
 
-    public static void PrintBplFile(string filename, Program program, bool allowPrintDesugaring, bool setTokens = true, bool pretty = false)
+    public static void PrintBplFile(string filename, Program program, bool allowPrintDesugaring, bool setTokens = true)
     {
       Contract.Requires(program != null);
       Contract.Requires(filename != null);
@@ -609,8 +550,8 @@ namespace Microsoft.Boogie
         CommandLineOptions.Clo.PrintDesugarings = false;
       }
       using (TokenTextWriter writer = filename == "-" ?
-                                      new TokenTextWriter("<console>", Console.Out, setTokens, pretty) :
-                                      new TokenTextWriter(filename, setTokens, pretty))
+                                      new TokenTextWriter("<console>", Console.Out, setTokens) :
+                                      new TokenTextWriter(filename, setTokens))
       {
         if (CommandLineOptions.Clo.ShowEnv != CommandLineOptions.ShowEnvironment.Never)
         {
@@ -645,7 +586,7 @@ namespace Microsoft.Boogie
           }
           if (CommandLineOptions.Clo.Trace)
           {
-            Console.WriteLine("Parsing " + GetFileNameForConsole(bplFileName));
+            Console.WriteLine("Parsing " + bplFileName);
           }
         }
 
@@ -654,17 +595,17 @@ namespace Microsoft.Boogie
         try
         {
           var defines = new List<string>() { "FILE_" + fileId };
-          errorCount = Parser.Parse(bplFileName, defines, out programSnippet, CommandLineOptions.Clo.UseBaseNameForFileName);
+          errorCount = Parser.Parse(bplFileName, defines, out programSnippet);
           if (programSnippet == null || errorCount != 0)
           {
-            Console.WriteLine("{0} parse errors detected in {1}", errorCount, GetFileNameForConsole(bplFileName));
+            Console.WriteLine("{0} parse errors detected in {1}", errorCount, bplFileName);
             okay = false;
             continue;
           }
         }
         catch (IOException e)
         {
-          printer.ErrorWriteLine(Console.Out, "Error opening file \"{0}\": {1}", GetFileNameForConsole(bplFileName), e.Message);
+          printer.ErrorWriteLine(Console.Out, "Error opening file \"{0}\": {1}", bplFileName, e.Message);
           okay = false;
           continue;
         }
@@ -674,7 +615,7 @@ namespace Microsoft.Boogie
         }
         else if (programSnippet != null)
         {
-          program.AddTopLevelDeclarations(programSnippet.TopLevelDeclarations);
+          program.TopLevelDeclarations.AddRange(programSnippet.TopLevelDeclarations);
         }
       }
       if (!okay)
@@ -691,11 +632,6 @@ namespace Microsoft.Boogie
       }
     }
 
-    internal static string GetFileNameForConsole(string filename)
-    {
-      return (CommandLineOptions.Clo.UseBaseNameForFileName && !string.IsNullOrEmpty(filename) && filename != "<console>") ? System.IO.Path.GetFileName(filename) : filename;
-    }
-
 
     /// <summary>
     /// Resolves and type checks the given Boogie program.  Any errors are reported to the
@@ -705,13 +641,13 @@ namespace Microsoft.Boogie
     ///  - TypeCheckingError if a type checking error occurred
     ///  - ResolvedAndTypeChecked if both resolution and type checking succeeded
     /// </summary>
-    public static PipelineOutcome ResolveAndTypecheck(Program program, string bplFileName, out LinearTypeChecker linearTypeChecker, out CivlTypeChecker civlTypeChecker)
+    public static PipelineOutcome ResolveAndTypecheck(Program program, string bplFileName, out LinearTypeChecker linearTypeChecker, out MoverTypeChecker moverTypeChecker)
     {
       Contract.Requires(program != null);
       Contract.Requires(bplFileName != null);
 
       linearTypeChecker = null;
-      civlTypeChecker = null;
+      moverTypeChecker = null;
 
       // ---------- Resolve ------------------------------------------------------------
 
@@ -723,7 +659,7 @@ namespace Microsoft.Boogie
       int errorCount = program.Resolve();
       if (errorCount != 0)
       {
-        Console.WriteLine("{0} name resolution errors detected in {1}", errorCount, GetFileNameForConsole(bplFileName));
+        Console.WriteLine("{0} name resolution errors detected in {1}", errorCount, bplFileName);
         return PipelineOutcome.ResolutionError;
       }
 
@@ -737,7 +673,7 @@ namespace Microsoft.Boogie
       errorCount = program.Typecheck();
       if (errorCount != 0)
       {
-        Console.WriteLine("{0} type checking errors detected in {1}", errorCount, GetFileNameForConsole(bplFileName));
+        Console.WriteLine("{0} type checking errors detected in {1}", errorCount, bplFileName);
         return PipelineOutcome.TypeCheckingError;
       }
 
@@ -746,13 +682,11 @@ namespace Microsoft.Boogie
           CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
       }
 
-      CollectModSets(program);
-
-      civlTypeChecker = new CivlTypeChecker(program);
-      civlTypeChecker.TypeCheck();
-      if (civlTypeChecker.errorCount != 0)
+      moverTypeChecker = new MoverTypeChecker(program);
+      moverTypeChecker.TypeCheck();
+      if (moverTypeChecker.errorCount != 0)
       {
-          Console.WriteLine("{0} type checking errors detected in {1}", civlTypeChecker.errorCount, GetFileNameForConsole(bplFileName));
+          Console.WriteLine("{0} type checking errors detected in {1}", moverTypeChecker.errorCount, bplFileName);
           return PipelineOutcome.TypeCheckingError;
       }
 
@@ -764,14 +698,14 @@ namespace Microsoft.Boogie
       }
       else
       {
-        Console.WriteLine("{0} type checking errors detected in {1}", linearTypeChecker.errorCount, GetFileNameForConsole(bplFileName));
+        Console.WriteLine("{0} type checking errors detected in {1}", linearTypeChecker.errorCount, bplFileName);
         return PipelineOutcome.TypeCheckingError;
       }
 
       if (CommandLineOptions.Clo.PrintFile != null && CommandLineOptions.Clo.PrintDesugarings)
       {
         // if PrintDesugaring option is engaged, print the file here, after resolution and type checking
-        PrintBplFile(CommandLineOptions.Clo.PrintFile, program, true, true, CommandLineOptions.Clo.PrettyPrint);
+        PrintBplFile(CommandLineOptions.Clo.PrintFile, program, true);
       }
 
       return PipelineOutcome.ResolvedAndTypeChecked;
@@ -781,10 +715,6 @@ namespace Microsoft.Boogie
     public static void Inline(Program program)
     {
       Contract.Requires(program != null);
-      
-      if (CommandLineOptions.Clo.Trace)
-          Console.WriteLine("Inlining...");
-
       // Inline
       var TopLevelDeclarations = cce.NonNull(program.TopLevelDeclarations);
 
@@ -793,10 +723,10 @@ namespace Microsoft.Boogie
         bool inline = false;
         foreach (var d in TopLevelDeclarations)
         {
-            if ((d is Procedure || d is Implementation) && d.FindExprAttribute("inline") != null)
-            {
-                inline = true;
-            }
+          if (d.FindExprAttribute("inline") != null)
+          {
+            inline = true;
+          }
         }
         if (inline)
         {
@@ -807,7 +737,7 @@ namespace Microsoft.Boogie
           }
           foreach (var impl in TopLevelDeclarations.OfType<Implementation>())
           {
-            if (CommandLineOptions.Clo.UserWantsToCheckRoutine(impl.Name) && !impl.SkipVerification)
+            if (!impl.SkipVerification)
             {
               Inliner.ProcessImplementation(program, impl);
             }
@@ -831,9 +761,8 @@ namespace Microsoft.Boogie
     ///    parameters contain meaningful values
     /// </summary>
     public static PipelineOutcome InferAndVerify(Program program,
-                                                 PipelineStatistics stats,
-                                                 string programId = null,
-                                                 ErrorReporterDelegate er = null, string requestId = null)
+                                                 PipelineStatistics stats, string filename,
+                                                 ErrorReporterDelegate er = null, string requestId = "unknown")
     {
       Contract.Requires(program != null);
       Contract.Requires(stats != null);
@@ -841,20 +770,9 @@ namespace Microsoft.Boogie
 
       if (requestId == null)
       {
-        requestId = FreshRequestId();
+        requestId = "unknown";
       }
-
-      var start = DateTime.UtcNow;
-
-      #region Do some pre-abstract-interpretation preprocessing on the program
-      // Doing lambda expansion before abstract interpretation means that the abstract interpreter
-      // never needs to see any lambda expressions.  (On the other hand, if it were useful for it
-      // to see lambdas, then it would be better to more lambda expansion until after infererence.)
-      if (CommandLineOptions.Clo.ExpandLambdas) {
-        LambdaHelper.ExpandLambdas(program);
-        //PrintBplFile ("-", program, true);
-      }
-      #endregion
+      RequestIdToCancellationTokenSources[requestId] = new List<CancellationTokenSource>();
 
       #region Infer invariants using Abstract Interpretation
 
@@ -871,7 +789,7 @@ namespace Microsoft.Boogie
 
       #endregion
 
-      #region Do some post-abstract-interpretation preprocessing on the program (e.g., loop unrolling)
+      #region Do some preprocessing on the program (e.g., loop unrolling, lambda expansion)
 
       if (CommandLineOptions.Clo.LoopUnrollCount != -1)
       {
@@ -886,8 +804,15 @@ namespace Microsoft.Boogie
 
       if (CommandLineOptions.Clo.PrintInstrumented)
       {
-        program.Emit(new TokenTextWriter(Console.Out, CommandLineOptions.Clo.PrettyPrint));
+        program.Emit(new TokenTextWriter(Console.Out));
       }
+
+      if (CommandLineOptions.Clo.ExpandLambdas)
+      {
+        LambdaHelper.ExpandLambdas(program);
+        //PrintBplFile ("-", program, true);
+      }
+
       #endregion
 
       if (!CommandLineOptions.Clo.Verify)
@@ -898,21 +823,20 @@ namespace Microsoft.Boogie
       #region Run Houdini and verify
       if (CommandLineOptions.Clo.ContractInfer)
       {
-        return RunHoudini(program, stats, er);
+        return RunHoudini(program, stats, er, filename);
       }
       #endregion
 
       #region Select and prioritize implementations that should be verified
 
-      var impls = program.Implementations.Where(
+      var impls = program.TopLevelDeclarations.OfType<Implementation>().Where(
         impl => impl != null && CommandLineOptions.Clo.UserWantsToCheckRoutine(cce.NonNull(impl.Name)) && !impl.SkipVerification);
 
       // operate on a stable copy, in case it gets updated while we're running
       Implementation[] stablePrioritizedImpls = null;
-      if (0 < CommandLineOptions.Clo.VerifySnapshots)
+      if (CommandLineOptions.Clo.VerifySnapshots)
       {
-        OtherDefinitionAxiomsCollector.Collect(program.Axioms);
-        DependencyCollector.Collect(program);
+        impls.Iter(impl => { impl.DependenciesChecksum = DependencyCollector.DependenciesChecksum(impl); });
         stablePrioritizedImpls = impls.OrderByDescending(
           impl => impl.Priority != 1 ? impl.Priority : Cache.VerificationPriority(impl)).ToArray();
       }
@@ -923,168 +847,76 @@ namespace Microsoft.Boogie
 
       #endregion
 
-      if (1 < CommandLineOptions.Clo.VerifySnapshots)
-      {
-        CachedVerificationResultInjector.Inject(program, stablePrioritizedImpls, requestId, programId, out stats.CachingActionCounts);
-      }
-
       #region Verify each implementation
 
       var outputCollector = new OutputCollector(stablePrioritizedImpls);
       var outcome = PipelineOutcome.VerificationCompleted;
-
+      var tasks = new Task[stablePrioritizedImpls.Length];
+      for (int i = 0; i < stablePrioritizedImpls.Length && outcome != PipelineOutcome.FatalError; i++)
+      {
+        var taskIndex = i;
+        var id = stablePrioritizedImpls[i].Id;
+        CancellationTokenSource src;
+        if (ImplIdToCancellationTokenSource.TryGetValue(id, out src))
+        {
+          src.Cancel();
+        }
+        src = new CancellationTokenSource();
+        RequestIdToCancellationTokenSources[requestId].Add(src);
+        ImplIdToCancellationTokenSource[id] = src;
+        var t = Task.Factory.StartNew((dummy) =>
+        {
+          VerifyImplementation(program, stats, er, requestId, extractLoopMappingInfo, stablePrioritizedImpls, taskIndex, outputCollector, Checkers, src.Token);
+          ImplIdToCancellationTokenSource.Remove(id);
+        }, src.Token, TaskCreationOptions.LongRunning);
+        tasks[taskIndex] = t;
+      }
       try
       {
-          var cts = new CancellationTokenSource();
-          RequestIdToCancellationTokenSource.AddOrUpdate(requestId, cts, (k, ov) => cts);
-
-          var tasks = new Task[stablePrioritizedImpls.Length];
-          // We use this semaphore to limit the number of tasks that are currently executing.
-          var semaphore = new SemaphoreSlim(CommandLineOptions.Clo.VcsCores);
-
-          // Create a task per implementation.
-          for (int i = 0; i < stablePrioritizedImpls.Length; i++)
-          {
-              var taskIndex = i;
-              var id = stablePrioritizedImpls[taskIndex].Id;
-
-              CancellationTokenSource old;
-              if (ImplIdToCancellationTokenSource.TryGetValue(id, out old))
-              {
-                  old.Cancel();
-              }
-              ImplIdToCancellationTokenSource.AddOrUpdate(id, cts, (k, ov) => cts);
-
-              var t = new Task((dummy) =>
-                  {
-                      try
-                      {
-                          if (outcome == PipelineOutcome.FatalError)
-                          {
-                              return;
-                          }
-                          if (cts.Token.IsCancellationRequested)
-                          {
-                              cts.Token.ThrowIfCancellationRequested();
-                          }
-                          VerifyImplementation(program, stats, er, requestId, extractLoopMappingInfo, stablePrioritizedImpls, taskIndex, outputCollector, Checkers, programId);
-                          ImplIdToCancellationTokenSource.TryRemove(id, out old);
-                      }
-                      finally
-                      {
-                          semaphore.Release();
-                      }
-                  }, cts.Token, TaskCreationOptions.None);
-              tasks[taskIndex] = t;
-          }
-
-          // Execute the tasks.
-          int j = 0;
-          for (; j < stablePrioritizedImpls.Length && outcome != PipelineOutcome.FatalError; j++)
-          {
-              try
-              {
-                  semaphore.Wait(cts.Token);
-              }
-              catch (OperationCanceledException)
-              {                  
-                  break;
-              }
-              tasks[j].Start(Scheduler);
-          }
-
-          // Don't wait for tasks that haven't been started yet.
-          tasks = tasks.Take(j).ToArray();
-          Task.WaitAll(tasks);
+        Task.WaitAll(tasks);
       }
       catch (AggregateException ae)
       {
-          ae.Handle(e =>
+        ae.Handle(e =>
+        {
+          var pe = e as ProverException;
+          if (pe != null)
           {
-              var pe = e as ProverException;
-              if (pe != null)
-              {
-                  printer.ErrorWriteLine(Console.Out, "Fatal Error: ProverException: {0}", e);
-                  outcome = PipelineOutcome.FatalError;
-                  return true;
-              }
-              var oce = e as OperationCanceledException;
-              if (oce != null)
-              {
-                  return true;
-              }
-              return false;
-          });
+            printer.ErrorWriteLine(Console.Out, "Fatal Error: ProverException: {0}", e);
+            outcome = PipelineOutcome.FatalError;
+            return true;
+          }
+          var oce = e as OperationCanceledException;
+          if (oce != null)
+          {
+            return true;
+          }
+          return false;
+        });
       }
       finally
       {
         CleanupCheckers(requestId);
       }
 
-      if (CommandLineOptions.Clo.PrintNecessaryAssumes && program.NecessaryAssumes.Any())
-      {
-        Console.WriteLine("Necessary assume command(s): {0}", string.Join(", ", program.NecessaryAssumes));
-      }
-
       cce.NonNull(CommandLineOptions.Clo.TheProverFactory).Close();
 
       outputCollector.WriteMoreOutput();
 
-      if (1 < CommandLineOptions.Clo.VerifySnapshots && programId != null)
-      {
-        program.FreezeTopLevelDeclarations();
-        programCache.Set(programId, program, policy);
-      }
-
-      if (0 <= CommandLineOptions.Clo.VerifySnapshots && CommandLineOptions.Clo.TraceCachingForBenchmarking)
-      {
-        var end = DateTime.UtcNow;
-        if (TimePerRequest.Count == 0)
-        {
-          FirstRequestStart = start;
-        }
-        TimePerRequest[requestId] = end.Subtract(start);
-        StatisticsPerRequest[requestId] = stats;
-
-        var printTimes = true;
-
-        Console.Out.WriteLine(CachedVerificationResultInjector.Statistics.Output(printTimes));
-
-        Console.Out.WriteLine("Statistics per request as CSV:");
-        var actions = string.Join(", ", Enum.GetNames(typeof(VC.ConditionGeneration.CachingAction)));
-        Console.Out.WriteLine("Request ID{0}, Error, E (C), Inconclusive, I (C), Out of Memory, OoM (C), Timeout, T (C), Verified, V (C), {1}", printTimes ? ", Time (ms)" : "", actions);
-        foreach (var kv in TimePerRequest.OrderBy(kv => ExecutionEngine.AutoRequestId(kv.Key)))
-        {
-          var s = StatisticsPerRequest[kv.Key];
-          var cacs = s.CachingActionCounts;
-          var c = cacs != null ? ", " + cacs.Select(ac => string.Format("{0,3}", ac)).Concat(", ") : "";
-          var t = printTimes ? string.Format(", {0,8:F0}", kv.Value.TotalMilliseconds) : "";
-          Console.Out.WriteLine("{0,-19}{1}, {2,2}, {3,2}, {4,2}, {5,2}, {6,2}, {7,2}, {8,2}, {9,2}, {10,2}, {11,2}{12}", kv.Key, t, s.ErrorCount, s.CachedErrorCount, s.InconclusiveCount, s.CachedInconclusiveCount, s.OutOfMemoryCount, s.CachedOutOfMemoryCount, s.TimeoutCount, s.CachedTimeoutCount, s.VerifiedCount, s.CachedVerifiedCount, c);
-        }
-
-        if (printTimes)
-        {
-          Console.Out.WriteLine();
-          Console.Out.WriteLine("Total time (ms) since first request: {0:F0}", end.Subtract(FirstRequestStart).TotalMilliseconds);
-        }
-      }
-
       #endregion
-
-      if (SecureVCGen.outfile != null)
-          SecureVCGen.outfile.Close();
 
       return outcome;
     }
+
 
     public static void CancelRequest(string requestId)
     {
       Contract.Requires(requestId != null);
 
-      CancellationTokenSource cts;
-      if (RequestIdToCancellationTokenSource.TryGetValue(requestId, out cts))
+      IList<CancellationTokenSource> ctss;
+      if (RequestIdToCancellationTokenSources.TryGetValue(requestId, out ctss))
       {
-        cts.Cancel();
+        ctss.Iter(cts => cts.Cancel());
 
         CleanupCheckers(requestId);
       }
@@ -1093,14 +925,9 @@ namespace Microsoft.Boogie
 
     private static void CleanupCheckers(string requestId)
     {
-      if (requestId != null)
+      lock (RequestIdToCancellationTokenSources)
       {
-        CancellationTokenSource old;
-        RequestIdToCancellationTokenSource.TryRemove(requestId, out old);
-      }
-      lock (RequestIdToCancellationTokenSource)
-      {
-        if (RequestIdToCancellationTokenSource.IsEmpty)
+        if (RequestIdToCancellationTokenSources.Count == 1)
         {
           lock (Checkers)
           {
@@ -1111,12 +938,21 @@ namespace Microsoft.Boogie
             }
           }
         }
+        if (requestId != null)
+        {
+          RequestIdToCancellationTokenSources.Remove(requestId);
+        }
       }
     }
 
 
-    private static void VerifyImplementation(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string requestId, Dictionary<string, Dictionary<string, Block>> extractLoopMappingInfo, Implementation[] stablePrioritizedImpls, int index, OutputCollector outputCollector, List<Checker> checkers, string programId)
+    private static void VerifyImplementation(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string requestId, Dictionary<string, Dictionary<string, Block>> extractLoopMappingInfo, Implementation[] stablePrioritizedImpls, int index, OutputCollector outputCollector, List<Checker> checkers, CancellationToken ct)
     {
+      if (ct.IsCancellationRequested)
+      {
+        ct.ThrowIfCancellationRequested();
+      }
+
       Implementation impl = stablePrioritizedImpls[index];
       VerificationResult verificationResult = null;
       var output = new StringWriter();
@@ -1124,32 +960,30 @@ namespace Microsoft.Boogie
       printer.Inform("", output);  // newline
       printer.Inform(string.Format("Verifying {0} ...", impl.Name), output);
 
-      int priority = 0;
-      var wasCached = false;
-      if (0 < CommandLineOptions.Clo.VerifySnapshots) {
-        var cachedResults = Cache.Lookup(impl, out priority);
-        if (cachedResults != null && priority == Priority.SKIP) {
-          if (CommandLineOptions.Clo.XmlSink != null) {
-            CommandLineOptions.Clo.XmlSink.WriteStartMethod(impl.Name, cachedResults.Start);
-          }
-
-          printer.Inform(string.Format("Retrieving cached verification result for implementation {0}...", impl.Name), output);
-          if (CommandLineOptions.Clo.VerifySnapshots < 3 || cachedResults.Outcome == ConditionGeneration.Outcome.Correct) {
-            verificationResult = cachedResults;
-            wasCached = true;
-          }
-        }
+      if (CommandLineOptions.Clo.VerifySnapshots)
+      {
+        verificationResult = Cache.Lookup(impl);
       }
 
-      if (!wasCached)
+      if (verificationResult != null)
+      {
+        if (CommandLineOptions.Clo.XmlSink != null)
+        {
+          CommandLineOptions.Clo.XmlSink.WriteStartMethod(impl.Name, verificationResult.Start);
+        }
+
+        printer.Inform(string.Format("Retrieving cached verification result for implementation {0}...", impl.Name), output);
+      }
+      else
       {
         #region Verify the implementation
 
-        verificationResult = new VerificationResult(requestId, impl, programId);
+        verificationResult = new VerificationResult(requestId, impl.Checksum, impl.DependenciesChecksum);
+        verificationResult.ImplementationName = impl.Name;
+        verificationResult.ImplementationToken = impl.tok;
 
         using (var vcgen = CreateVCGen(program, checkers))
         {
-          vcgen.CachingActionCounts = stats.CachingActionCounts;
           verificationResult.ProofObligationCountBefore = vcgen.CumulativeAssertionCount;
           verificationResult.Start = DateTime.UtcNow;
 
@@ -1164,9 +998,10 @@ namespace Microsoft.Boogie
               var svcgen = vcgen as VC.StratifiedVCGen;
               Contract.Assert(svcgen != null);
               var ss = new HashSet<string>();
-              foreach (var c in program.Constants)
+              foreach (var tdecl in program.TopLevelDeclarations)
               {
-                if (!c.Name.StartsWith(CommandLineOptions.Clo.inferLeastForUnsat)) continue;
+                var c = tdecl as Constant;
+                if (c == null || !c.Name.StartsWith(CommandLineOptions.Clo.inferLeastForUnsat)) continue;
                 ss.Add(c.Name);
               }
               verificationResult.Outcome = svcgen.FindLeastToVerify(impl, ref ss);
@@ -1220,9 +1055,9 @@ namespace Microsoft.Boogie
 
         #region Cache the verification result
 
-        if (0 < CommandLineOptions.Clo.VerifySnapshots && !string.IsNullOrEmpty(impl.Checksum))
+        if (CommandLineOptions.Clo.VerifySnapshots && !string.IsNullOrEmpty(impl.Checksum))
         {
-          Cache.Insert(impl, verificationResult);
+          Cache.Insert(impl.Id, verificationResult);
         }
 
         #endregion
@@ -1230,7 +1065,7 @@ namespace Microsoft.Boogie
 
       #region Process the verification results and statistics
 
-      ProcessOutcome(verificationResult.Outcome, verificationResult.Errors, TimeIndication(verificationResult), stats, output, impl.TimeLimit, er, verificationResult.ImplementationName, verificationResult.ImplementationToken, verificationResult.RequestId, wasCached);
+      ProcessOutcome(verificationResult.Outcome, verificationResult.Errors, TimeIndication(verificationResult), stats, output, impl.TimeLimit, er, verificationResult.ImplementationName, verificationResult.ImplementationToken, verificationResult.RequestId);
 
       ProcessErrors(verificationResult.Errors, verificationResult.Outcome, output, er, impl);
 
@@ -1267,10 +1102,9 @@ namespace Microsoft.Boogie
       {
         lock (outputs)
         {
-          for (; nextPrintableIndex < outputs.Length && outputs[nextPrintableIndex] != null; nextPrintableIndex++)
+          for (; nextPrintableIndex < outputs.Count() && outputs[nextPrintableIndex] != null; nextPrintableIndex++)
           {
             Console.Write(outputs[nextPrintableIndex].ToString());
-            outputs[nextPrintableIndex] = null;
             Console.Out.Flush();
           }
         }
@@ -1304,13 +1138,9 @@ namespace Microsoft.Boogie
       {
         vcgen = new StratifiedVCGen(program, CommandLineOptions.Clo.SimplifyLogFilePath, CommandLineOptions.Clo.SimplifyLogFileAppend, checkers);
       }
-      else if (CommandLineOptions.Clo.SecureVcGen != null)
-      {
-          vcgen = new SecureVCGen(program, CommandLineOptions.Clo.SimplifyLogFilePath, CommandLineOptions.Clo.SimplifyLogFileAppend, checkers);
-      }
       else
       {
-          vcgen = new VCGen(program, CommandLineOptions.Clo.SimplifyLogFilePath, CommandLineOptions.Clo.SimplifyLogFileAppend, checkers);
+        vcgen = new VCGen(program, CommandLineOptions.Clo.SimplifyLogFilePath, CommandLineOptions.Clo.SimplifyLogFileAppend, checkers);
       }
       return vcgen;
     }
@@ -1318,7 +1148,7 @@ namespace Microsoft.Boogie
 
     #region Houdini
 
-    private static PipelineOutcome RunHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er)
+    private static PipelineOutcome RunHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string filename)
     {
       Contract.Requires(stats != null);
 
@@ -1326,14 +1156,27 @@ namespace Microsoft.Boogie
       {
         return RunAbstractHoudini(program, stats, er);
       }
+#if false
+      if (CommandLineOptions.Clo.ICEHoudini != null)
+      {
+          return RunICEHoudini(program, stats, er, filename);
+      }
+#endif
+      if (CommandLineOptions.Clo.MLHoudini != null)
+      {
+          //Console.WriteLine("Running ML Houdini");
+          return RunMLHoudini(program, stats, er, filename);
+      }
+
+      if (CommandLineOptions.Clo.MLHoudiniSymb != null)
+      {
+          //Console.WriteLine("Running ML Houdini");
+          return RunMLHoudiniSymb(program, stats, er, filename);
+      }
 
       if (CommandLineOptions.Clo.StagedHoudini != null)
       {
         return RunStagedHoudini(program, stats, er);
-      }
-
-      if(CommandLineOptions.Clo.DLHoudini != null) {
-        return RunDLHoudini(program, stats, er);
       }
 
       Houdini.HoudiniSession.HoudiniStatistics houdiniStats = new Houdini.HoudiniSession.HoudiniStatistics();
@@ -1376,12 +1219,12 @@ namespace Microsoft.Boogie
       return PipelineOutcome.Done;
     }
 
-    public static Program ProgramFromFile(string filename) {
+    private static Program ProgramFromFile(string filename) {
       Program p = ParseBoogieProgram(new List<string> { filename }, false);
       System.Diagnostics.Debug.Assert(p != null);
       LinearTypeChecker linearTypeChecker;
-      CivlTypeChecker civlTypeChecker;
-      PipelineOutcome oc = ExecutionEngine.ResolveAndTypecheck(p, filename, out linearTypeChecker, out civlTypeChecker);
+      MoverTypeChecker moverTypeChecker;
+      PipelineOutcome oc = ExecutionEngine.ResolveAndTypecheck(p, filename, out linearTypeChecker, out moverTypeChecker);
       System.Diagnostics.Debug.Assert(oc == PipelineOutcome.ResolvedAndTypeChecked);
       return p;
     }
@@ -1389,8 +1232,10 @@ namespace Microsoft.Boogie
     private static PipelineOutcome RunStagedHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er)
     {
       Houdini.HoudiniSession.HoudiniStatistics houdiniStats = new Houdini.HoudiniSession.HoudiniStatistics();
-      Houdini.StagedHoudini stagedHoudini = new Houdini.StagedHoudini(program, houdiniStats, ProgramFromFile);
-      Houdini.HoudiniOutcome outcome = stagedHoudini.PerformStagedHoudiniInference();
+      // TODO - pass this in somewhere
+
+      Houdini.StagedHoudini houdini = new Houdini.StagedHoudini(program, ProgramFromFile);
+      Houdini.HoudiniOutcome outcome = houdini.PerformStagedHoudiniInference();
 
       if (CommandLineOptions.Clo.PrintAssignment)
       {
@@ -1431,56 +1276,87 @@ namespace Microsoft.Boogie
 
     private static PipelineOutcome RunAbstractHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er)
     {
-      Contract.Requires(stats != null);
+        Contract.Requires(stats != null);
 
-      //CommandLineOptions.Clo.PrintErrorModel = 1;
-      CommandLineOptions.Clo.UseProverEvaluate = true;
-      CommandLineOptions.Clo.ModelViewFile = "z3model";
-      CommandLineOptions.Clo.UseArrayTheory = true;
-      CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
-      Houdini.AbstractDomainFactory.Initialize(program);
-      var domain = Houdini.AbstractDomainFactory.GetInstance(CommandLineOptions.Clo.AbstractHoudini);
+        //CommandLineOptions.Clo.PrintErrorModel = 1;
+        CommandLineOptions.Clo.UseProverEvaluate = true;
+        CommandLineOptions.Clo.ModelViewFile = "z3model";
+        CommandLineOptions.Clo.UseArrayTheory = true;
+        CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
+        Houdini.AbstractDomainFactory.Initialize(program);
+        var domain = Houdini.AbstractDomainFactory.GetInstance(CommandLineOptions.Clo.AbstractHoudini);
 
-      // Run Abstract Houdini
-      var abs = new Houdini.AbsHoudini(program, domain);
-      var absout = abs.ComputeSummaries();
-      ProcessOutcome(absout.outcome, absout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
-      ProcessErrors(absout.errors, absout.outcome, Console.Out, er);
+        // Run Abstract Houdini
+        var abs = new Houdini.AbsHoudini(program, domain);
+        var absout = abs.ComputeSummaries();
+        ProcessOutcome(absout.outcome, absout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+        ProcessErrors(absout.errors, absout.outcome, Console.Out, er);
 
-      //Houdini.PredicateAbs.Initialize(program);
-      //var abs = new Houdini.AbstractHoudini(program);
-      //abs.computeSummaries(new Houdini.PredicateAbs(program.TopLevelDeclarations.OfType<Implementation>().First().Name));
+        //Houdini.PredicateAbs.Initialize(program);
+        //var abs = new Houdini.AbstractHoudini(program);
+        //abs.computeSummaries(new Houdini.PredicateAbs(program.TopLevelDeclarations.OfType<Implementation>().First().Name));
 
-      return PipelineOutcome.Done;
+        return PipelineOutcome.Done;
     }
 
-    private static PipelineOutcome RunDLHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er)
+#if false
+    private static PipelineOutcome RunICEHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string filename)
     {
-      Contract.Requires(stats != null);
+        Contract.Requires(stats != null);
 
-      //CommandLineOptions.Clo.PrintErrorModel = 1;
-      CommandLineOptions.Clo.UseProverEvaluate = true;
-      CommandLineOptions.Clo.ModelViewFile = "z3model";
-      CommandLineOptions.Clo.UseArrayTheory = true;
-      CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
-      
-      //Houdini.AbstractDomainFactory.Initialize(program);
-      //var domain = Houdini.AbstractDomainFactory.GetInstance(CommandLineOptions.Clo.AbstractHoudini);
+        //CommandLineOptions.Clo.PrintErrorModel = 1;
+        CommandLineOptions.Clo.UseProverEvaluate = true;
+        CommandLineOptions.Clo.ModelViewFile = "z3model";
+        CommandLineOptions.Clo.UseArrayTheory = true;
+        CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
+        
+        // Run Abstract Houdini
+        var ice = new Houdini.ICEHoudini(program, CommandLineOptions.Clo.ICEHoudini, filename);
+        var iceout = ice.ComputeSummaries();
+        ProcessOutcome(iceout.outcome, iceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+        ProcessErrors(iceout.errors, iceout.outcome, Console.Out, er);
 
-      // Run Abstract Houdini
-      var dl = new Houdini.DLHoudini(program, domain);
-      var dlout = dl.ComputeSummaries();
-      ProcessOutcome(dlout.outcome, dlout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
-      ProcessErrors(dlout.errors, dlout.outcome, Console.Out, er);
+        return PipelineOutcome.Done;
+    }
+#endif 
+    
+    private static PipelineOutcome RunMLHoudini(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string filename)
+    {
+        Contract.Requires(stats != null);
 
-      //Houdini.PredicateAbs.Initialize(program);
-      //var abs = new Houdini.AbstractHoudini(program);
-      //abs.computeSummaries(new Houdini.PredicateAbs(program.TopLevelDeclarations.OfType<Implementation>().First().Name));
+        //CommandLineOptions.Clo.PrintErrorModel = 1;
+        CommandLineOptions.Clo.UseProverEvaluate = true;
+        CommandLineOptions.Clo.ModelViewFile = "z3model";
+        CommandLineOptions.Clo.UseArrayTheory = true;
+        CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
 
-      return PipelineOutcome.Done;
+        // Run Abstract Houdini
+        var mlice = new Houdini.MLHoudini(program, CommandLineOptions.Clo.MLHoudini, filename, CommandLineOptions.Clo.MLHoudiniUseBounds);
+        var mliceout = mlice.ComputeSummaries();
+        ProcessOutcome(mliceout.outcome, mliceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+        ProcessErrors(mliceout.errors, mliceout.outcome, Console.Out, er);
+       
+        return PipelineOutcome.Done;
     }
 
+    private static PipelineOutcome RunMLHoudiniSymb(Program program, PipelineStatistics stats, ErrorReporterDelegate er, string filename)
+    {
+        Contract.Requires(stats != null);
 
+        //CommandLineOptions.Clo.PrintErrorModel = 1;
+        CommandLineOptions.Clo.UseProverEvaluate = true;
+        CommandLineOptions.Clo.ModelViewFile = "z3model";
+        CommandLineOptions.Clo.UseArrayTheory = true;
+        CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
+
+        // Run Abstract Houdini
+        var mlice = new Houdini.MLHoudiniSymb(program, CommandLineOptions.Clo.MLHoudiniSymb, filename);
+        var mliceout = mlice.ComputeSummaries();
+        ProcessOutcome(mliceout.outcome, mliceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+        ProcessErrors(mliceout.errors, mliceout.outcome, Console.Out, er);
+
+        return PipelineOutcome.Done;
+    }
     #endregion
 
 
@@ -1500,19 +1376,19 @@ namespace Microsoft.Boogie
 
 
     private static void ProcessOutcome(VC.VCGen.Outcome outcome, List<Counterexample> errors, string timeIndication,
-                                       PipelineStatistics stats, TextWriter tw, int timeLimit, ErrorReporterDelegate er = null, string implName = null, IToken implTok = null, string requestId = null, bool wasCached = false)
+                                       PipelineStatistics stats, TextWriter tw, int timeLimit, ErrorReporterDelegate er = null, string implName = null, IToken implTok = null, string requestId = null)
     {
       Contract.Requires(stats != null);
 
-      UpdateStatistics(stats, outcome, errors, wasCached);
+      UpdateStatistics(stats, outcome, errors);
 
       printer.Inform(timeIndication + OutcomeIndication(outcome, errors), tw);
 
-      ReportOutcome(outcome, er, implName, implTok, requestId, tw, timeLimit, errors);
+      ReportOutcome(outcome, er, implName, implTok, requestId, tw, timeLimit);
     }
 
 
-    private static void ReportOutcome(VC.VCGen.Outcome outcome, ErrorReporterDelegate er, string implName, IToken implTok, string requestId, TextWriter tw, int timeLimit, List<Counterexample> errors)
+    private static void ReportOutcome(VC.VCGen.Outcome outcome, ErrorReporterDelegate er, string implName, IToken implTok, string requestId, TextWriter tw, int timeLimit)
     {
       ErrorInformation errorInfo = null;
 
@@ -1521,74 +1397,10 @@ namespace Microsoft.Boogie
         case VCGen.Outcome.ReachedBound:
           tw.WriteLine(string.Format("Stratified Inlining: Reached recursion bound of {0}", CommandLineOptions.Clo.RecursionBound));
           break;
-        case VCGen.Outcome.Errors:
         case VCGen.Outcome.TimedOut:
           if (implName != null && implTok != null)
           {
-            if (outcome == ConditionGeneration.Outcome.TimedOut || (errors != null && errors.Any(e => e.IsAuxiliaryCexForDiagnosingTimeouts)))
-            {
-              errorInfo = errorInformationFactory.CreateErrorInformation(implTok, string.Format("Verification of '{1}' timed out after {0} seconds", timeLimit, implName), requestId);
-            }
-
-            //  Report timed out assertions as auxiliary info.
-            if (errors != null)
-            {
-              var cmpr = new CounterexampleComparer();
-              var timedOutAssertions = errors.Where(e => e.IsAuxiliaryCexForDiagnosingTimeouts).Distinct(cmpr).ToList();
-              timedOutAssertions.Sort(cmpr);
-              if (0 < timedOutAssertions.Count)
-              {
-                errorInfo.Msg += string.Format(" with {0} check(s) that timed out individually", timedOutAssertions.Count);
-              }
-              foreach (Counterexample error in timedOutAssertions)
-              {
-                var callError = error as CallCounterexample;
-                var returnError = error as ReturnCounterexample;
-                var assertError = error as AssertCounterexample;
-                IToken tok = null;
-                string msg = null;
-                if (callError != null)
-                {
-                  tok = callError.FailingCall.tok;
-                  msg = callError.FailingCall.ErrorData as string ?? "A precondition for this call might not hold.";
-                }
-                else if (returnError != null)
-                {
-                  tok = returnError.FailingReturn.tok;
-                  msg = "A postcondition might not hold on this return path.";
-                }
-                else
-                {
-                  tok = assertError.FailingAssert.tok;
-                  if (assertError.FailingAssert is LoopInitAssertCmd)
-                  {
-                    msg = "This loop invariant might not hold on entry.";
-                  }
-                  else if (assertError.FailingAssert is LoopInvMaintainedAssertCmd)
-                  {
-                    msg = "This loop invariant might not be maintained by the loop.";
-                  }
-                  else
-                  {
-                    msg = assertError.FailingAssert.ErrorData as string;
-                    if (!CommandLineOptions.Clo.ForceBplErrors && assertError.FailingAssert.ErrorMessage != null)
-                    {
-                      msg = assertError.FailingAssert.ErrorMessage;
-                    }
-                    if (msg == null)
-                    {
-                      msg = "This assertion might not hold.";
-                    }
-                  }
-                }
-                errorInfo.AddAuxInfo(tok, msg, "Unverified check due to timeout");
-              }
-            }
-          }
-          break;
-        case VCGen.Outcome.OutOfResource:
-          if (implName != null && implTok != null) {
-            errorInfo = errorInformationFactory.CreateErrorInformation(implTok, "Verification out of resource (" + implName + ")", requestId);
+            errorInfo = errorInformationFactory.CreateErrorInformation(implTok, string.Format("Verification timed out after {0} seconds ({1})", timeLimit, implName), requestId);
           }
           break;
         case VCGen.Outcome.OutOfMemory:
@@ -1615,10 +1427,6 @@ namespace Microsoft.Boogie
             er(errorInfo);
           }
         }
-        else
-        {
-          printer.WriteErrorInformation(errorInfo, tw);
-        }
       }
     }
 
@@ -1640,9 +1448,6 @@ namespace Microsoft.Boogie
         case VCGen.Outcome.TimedOut:
           traceOutput = "timed out";
           break;
-        case VCGen.Outcome.OutOfResource:
-          traceOutput = "out of resource";
-          break;
         case VCGen.Outcome.OutOfMemory:
           traceOutput = "out of memory";
           break;
@@ -1658,7 +1463,7 @@ namespace Microsoft.Boogie
     }
 
 
-    private static void UpdateStatistics(PipelineStatistics stats, VC.VCGen.Outcome outcome, List<Counterexample> errors, bool wasCached)
+    private static void UpdateStatistics(PipelineStatistics stats, VC.VCGen.Outcome outcome, List<Counterexample> errors)
     {
       Contract.Requires(stats != null);
 
@@ -1669,39 +1474,27 @@ namespace Microsoft.Boogie
           throw new cce.UnreachableException();
         case VCGen.Outcome.ReachedBound:
           Interlocked.Increment(ref stats.VerifiedCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedVerifiedCount); }
           break;
         case VCGen.Outcome.Correct:
           Interlocked.Increment(ref stats.VerifiedCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedVerifiedCount); }
           break;
         case VCGen.Outcome.TimedOut:
           Interlocked.Increment(ref stats.TimeoutCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedTimeoutCount); }
-          break;
-        case VCGen.Outcome.OutOfResource:
-          Interlocked.Increment(ref stats.OutOfResourceCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedOutOfResourceCount); }
           break;
         case VCGen.Outcome.OutOfMemory:
           Interlocked.Increment(ref stats.OutOfMemoryCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedOutOfMemoryCount); }
           break;
         case VCGen.Outcome.Inconclusive:
           Interlocked.Increment(ref stats.InconclusiveCount);
-          if (wasCached) { Interlocked.Increment(ref stats.CachedInconclusiveCount); }
           break;
         case VCGen.Outcome.Errors:
           if (CommandLineOptions.Clo.vcVariety == CommandLineOptions.VCVariety.Doomed)
           {
             Interlocked.Increment(ref stats.ErrorCount);
-            if (wasCached) { Interlocked.Increment(ref stats.CachedErrorCount); }
           }
           else
           {
-            int cnt = errors.Where(e => !e.IsAuxiliaryCexForDiagnosingTimeouts).Count();
-            Interlocked.Add(ref stats.ErrorCount, cnt);
-            if (wasCached) { Interlocked.Add(ref stats.CachedErrorCount, cnt); }
+            Interlocked.Add(ref stats.ErrorCount, errors.Count);
           }
           break;
       }
@@ -1717,10 +1510,6 @@ namespace Microsoft.Boogie
         errors.Sort(new CounterexampleComparer());
         foreach (Counterexample error in errors)
         {
-          if (error.IsAuxiliaryCexForDiagnosingTimeouts)
-          {
-            continue;
-          }
           var errorInfo = CreateErrorInformation(error, outcome);
           errorInfo.ImplementationName = implName;
 
@@ -1779,56 +1568,47 @@ namespace Microsoft.Boogie
       {
         cause = "Out of memory on";
       }
-      else if (outcome == VCGen.Outcome.OutOfResource) {
-        cause = "Out of resource on";
-      }
 
       var callError = error as CallCounterexample;
       var returnError = error as ReturnCounterexample;
       var assertError = error as AssertCounterexample;
       if (callError != null)
       {
-        errorInfo = errorInformationFactory.CreateErrorInformation(callError.FailingCall.tok, callError.FailingCall.ErrorData as string ?? "A precondition for this call might not hold.", callError.RequestId, callError.OriginalRequestId, cause);
+        errorInfo = errorInformationFactory.CreateErrorInformation(callError.FailingCall.tok, callError.FailingCall.ErrorData as string ?? "A precondition for this call might not hold.", callError.RequestId, cause);
         errorInfo.BoogieErrorCode = "BP5002";
         errorInfo.Kind = ErrorKind.Precondition;
         errorInfo.AddAuxInfo(callError.FailingRequires.tok, callError.FailingRequires.ErrorData as string ?? "This is the precondition that might not hold.", "Related location");
 
         if (!CommandLineOptions.Clo.ForceBplErrors && callError.FailingRequires.ErrorMessage != null)
         {
-          errorInfo = errorInformationFactory.CreateErrorInformation(null, callError.FailingRequires.ErrorMessage, callError.RequestId, callError.OriginalRequestId, cause);
+          errorInfo = errorInformationFactory.CreateErrorInformation(null, callError.FailingRequires.ErrorMessage, callError.RequestId, cause);
         }
       }
       else if (returnError != null)
       {
-        errorInfo = errorInformationFactory.CreateErrorInformation(returnError.FailingReturn.tok, "A postcondition might not hold on this return path.", returnError.RequestId, returnError.OriginalRequestId, cause);
+        errorInfo = errorInformationFactory.CreateErrorInformation(returnError.FailingReturn.tok, "A postcondition might not hold on this return path.", returnError.RequestId, cause);
         errorInfo.BoogieErrorCode = "BP5003";
         errorInfo.Kind = ErrorKind.Postcondition;
         errorInfo.AddAuxInfo(returnError.FailingEnsures.tok, returnError.FailingEnsures.ErrorData as string ?? "This is the postcondition that might not hold.", "Related location");
 
         if (!CommandLineOptions.Clo.ForceBplErrors && returnError.FailingEnsures.ErrorMessage != null)
         {
-          errorInfo = errorInformationFactory.CreateErrorInformation(null, returnError.FailingEnsures.ErrorMessage, returnError.RequestId, returnError.OriginalRequestId, cause);
+          errorInfo = errorInformationFactory.CreateErrorInformation(null, returnError.FailingEnsures.ErrorMessage, returnError.RequestId, cause);
         }
       }
       else // error is AssertCounterexample
       {
         if (assertError.FailingAssert is LoopInitAssertCmd)
         {
-          errorInfo = errorInformationFactory.CreateErrorInformation(assertError.FailingAssert.tok, "This loop invariant might not hold on entry.", assertError.RequestId, assertError.OriginalRequestId, cause);
+          errorInfo = errorInformationFactory.CreateErrorInformation(assertError.FailingAssert.tok, "This loop invariant might not hold on entry.", assertError.RequestId, cause);
           errorInfo.BoogieErrorCode = "BP5004";
           errorInfo.Kind = ErrorKind.InvariantEntry;
-          if ((assertError.FailingAssert.ErrorData as string) != null) {
-            errorInfo.AddAuxInfo(assertError.FailingAssert.tok, assertError.FailingAssert.ErrorData as string, "Related message");
-          }
         }
         else if (assertError.FailingAssert is LoopInvMaintainedAssertCmd)
         {
-          errorInfo = errorInformationFactory.CreateErrorInformation(assertError.FailingAssert.tok, "This loop invariant might not be maintained by the loop.", assertError.RequestId, assertError.OriginalRequestId, cause);
+          errorInfo = errorInformationFactory.CreateErrorInformation(assertError.FailingAssert.tok, "This loop invariant might not be maintained by the loop.", assertError.RequestId, cause);
           errorInfo.BoogieErrorCode = "BP5005";
           errorInfo.Kind = ErrorKind.InvariantMaintainance;
-          if ((assertError.FailingAssert.ErrorData as string) != null) {
-            errorInfo.AddAuxInfo(assertError.FailingAssert.tok, assertError.FailingAssert.ErrorData as string, "Related message");
-          }
         }
         else
         {
@@ -1850,7 +1630,7 @@ namespace Microsoft.Boogie
             bec = "BP5001";
           }
 
-          errorInfo = errorInformationFactory.CreateErrorInformation(tok, msg, assertError.RequestId, assertError.OriginalRequestId, cause);
+          errorInfo = errorInformationFactory.CreateErrorInformation(tok, msg, assertError.RequestId, cause);
           errorInfo.BoogieErrorCode = bec;
           errorInfo.Kind = ErrorKind.Assertion;
         }

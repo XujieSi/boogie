@@ -7,41 +7,37 @@ namespace Microsoft.Boogie
 {
     public class Concurrency
     {
-        public static void Transform(LinearTypeChecker linearTypeChecker, CivlTypeChecker civlTypeChecker)
+        public static void Transform(LinearTypeChecker linearTypeChecker, MoverTypeChecker moverTypeChecker)
         {
+            // The order in which originalDecls are computed and then *.AddCheckers are called is 
+            // apparently important.  The MyDuplicator code currently does not duplicate Attributes.
+            // Consequently, all the yield attributes are eliminated by the AddCheckers code.
+
             List<Declaration> originalDecls = new List<Declaration>();
             Program program = linearTypeChecker.program;
             foreach (var decl in program.TopLevelDeclarations)
             {
                 Procedure proc = decl as Procedure;
-                if (proc != null && civlTypeChecker.procToActionInfo.ContainsKey(proc))
+                if (proc != null && QKeyValue.FindBoolAttribute(proc.Attributes, "yields"))
                 {
                     originalDecls.Add(proc);
                     continue;
                 }
                 Implementation impl = decl as Implementation;
-                if (impl != null && civlTypeChecker.procToActionInfo.ContainsKey(impl.Proc))
+                if (impl != null && QKeyValue.FindBoolAttribute(impl.Proc.Attributes, "yields"))
                 {
                     originalDecls.Add(impl);
                 }
             }
 
             List<Declaration> decls = new List<Declaration>();
-            if (!CommandLineOptions.Clo.TrustAtomicityTypes)
-            {
-                MoverCheck.AddCheckers(linearTypeChecker, civlTypeChecker, decls);
-            } 
-            CivlRefinement.AddCheckers(linearTypeChecker, civlTypeChecker, decls);
-            foreach (AtomicActionInfo info in civlTypeChecker.procToActionInfo.Values.Where(x => x is AtomicActionInfo))
-            {
-                decls.AddRange(info.triggerFuns.Values);
-            }
-            foreach (Declaration decl in decls)
-            {
-                CivlAttributes.RemoveYieldsAttribute(decl);
-            }
-            program.RemoveTopLevelDeclarations(x => originalDecls.Contains(x));
-            program.AddTopLevelDeclarations(decls);
+            OwickiGries.AddCheckers(linearTypeChecker, moverTypeChecker, decls);
+            MoverCheck.AddCheckers(linearTypeChecker, moverTypeChecker, decls);
+            RefinementCheck.AddCheckers(linearTypeChecker, moverTypeChecker, decls);
+
+            program.TopLevelDeclarations.RemoveAll(x => originalDecls.Contains(x));
+            program.TopLevelDeclarations.AddRange(decls);
         }
+
     }
 }

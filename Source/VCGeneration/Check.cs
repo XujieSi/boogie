@@ -44,7 +44,6 @@ namespace Microsoft.Boogie {
 
     private ProverInterface thmProver;
     private int timeout;
-    private int rlimit;
 
     // state for the async interface
     private volatile ProverInterface.Outcome outcome;
@@ -72,8 +71,8 @@ namespace Microsoft.Boogie {
 
     public Task ProverTask { get; set; }
 
-    public bool WillingToHandle(int timeout, int rlimit, Program prog) {
-      return status == CheckerStatus.Idle && timeout == this.timeout && rlimit == this.rlimit && (prog == null || Program == prog);
+    public bool WillingToHandle(int timeout, Program prog) {
+      return status == CheckerStatus.Idle && timeout == this.timeout && (prog == null || Program == prog);
     }
 
     public VCExpressionGenerator VCExprGen {
@@ -127,11 +126,10 @@ namespace Microsoft.Boogie {
     /// Constructor.  Initialize a checker with the program and log file.
     /// Optionally, use prover context provided by parameter "ctx". 
     /// </summary>
-    public Checker(VC.ConditionGeneration vcgen, Program prog, string/*?*/ logFilePath, bool appendLogFile, int timeout, int rlimit = 0, ProverContext ctx = null) {
+    public Checker(VC.ConditionGeneration vcgen, Program prog, string/*?*/ logFilePath, bool appendLogFile, int timeout, ProverContext ctx = null) {
       Contract.Requires(vcgen != null);
       Contract.Requires(prog != null);
       this.timeout = timeout;
-      this.rlimit = rlimit;
       this.Program = prog;
 
       ProverOptions options = cce.NonNull(CommandLineOptions.Clo.TheProverFactory).BlankProverOptions();
@@ -144,12 +142,6 @@ namespace Microsoft.Boogie {
 
       if (timeout > 0) {
         options.TimeLimit = timeout * 1000;
-      }
-
-      if (rlimit > 0) {
-        options.ResourceLimit = rlimit;
-      } else {
-        options.ResourceLimit = 0;
       }
 
       options.Parse(CommandLineOptions.Clo.ProverOptions);
@@ -184,7 +176,7 @@ namespace Microsoft.Boogie {
       this.gen = prover.VCExprGen;
     }
 
-    public void Retarget(Program prog, ProverContext ctx, int timeout = 0, int rlimit = 0)
+    public void Retarget(Program prog, ProverContext ctx, int timeout = 0)
     {
       lock (this)
       {
@@ -197,8 +189,6 @@ namespace Microsoft.Boogie {
         Setup(prog, ctx);
         this.timeout = timeout;
         SetTimeout();
-        this.rlimit = rlimit;
-        SetRlimit();
       }
     }
 
@@ -221,24 +211,12 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public void SetRlimit()
-    {
-      if (0 < rlimit) {
-        TheoremProver.SetRlimit(rlimit);
-      }
-      else 
-      {
-        TheoremProver.SetRlimit(0);
-      }
-    }
-
     /// <summary>
     /// Set up the context.
     /// </summary>
     private void Setup(Program prog, ProverContext ctx)
     {
       Program = prog;
-      // TODO(wuestholz): Is this lock necessary?
       lock (Program.TopLevelDeclarations)
       {
         foreach (Declaration decl in Program.TopLevelDeclarations)
@@ -334,12 +312,13 @@ namespace Microsoft.Boogie {
     private void WaitForOutput(object dummy) {
       lock (this)
       {
-        try {
+        try
+        {
           outcome = thmProver.CheckOutcome(cce.NonNull(handler));
-        } catch (UnexpectedProverOutputException e) {
+        }
+        catch (UnexpectedProverOutputException e)
+        {
           outputExn = e;
-        } catch (Exception e) {
-          outputExn = new UnexpectedProverOutputException(e.Message);
         }
 
         switch (outcome)
@@ -352,9 +331,6 @@ namespace Microsoft.Boogie {
             break;
           case ProverInterface.Outcome.TimeOut:
             thmProver.LogComment("Timed out");
-            break;
-          case ProverInterface.Outcome.OutOfResource:
-            thmProver.LogComment("Out of resource");
             break;
           case ProverInterface.Outcome.OutOfMemory:
             thmProver.LogComment("Out of memory");
@@ -379,14 +355,14 @@ namespace Microsoft.Boogie {
       hasOutput = false;
       outputExn = null;
       this.handler = handler;
-      
+
       thmProver.Reset(gen);
       SetTimeout();
       proverStart = DateTime.UtcNow;
       thmProver.BeginCheck(descriptiveName, vc, handler);
       //  gen.ClearSharedFormulas();    PR: don't know yet what to do with this guy
 
-      ProverTask = Task.Factory.StartNew(() => { WaitForOutput(null); }, TaskCreationOptions.LongRunning);
+      ProverTask = Task.Factory.StartNew(() => { WaitForOutput(null); } , TaskCreationOptions.LongRunning);
     }
 
     public ProverInterface.Outcome ReadOutcome() {
@@ -409,7 +385,6 @@ namespace Microsoft.Boogie {
   // -----------------------------------------------------------------------------------------------
 
   public abstract class ProverInterface {
-
     public static ProverInterface CreateProver(Program prog, string/*?*/ logFilePath, bool appendLogFile, int timeout, int taskID = -1) {
       Contract.Requires(prog != null);
 
@@ -454,8 +429,12 @@ namespace Microsoft.Boogie {
           }
         }
       }
-      foreach (var ax in prog.Axioms) {
-        ctx.AddAxiom(ax, null);
+      foreach (Declaration decl in prog.TopLevelDeclarations) {
+        Contract.Assert(decl != null);
+        Axiom ax = decl as Axiom;
+        if (ax != null) {
+          ctx.AddAxiom(ax, null);
+        }
       }
       foreach (Declaration decl in prog.TopLevelDeclarations) {
         Contract.Assert(decl != null);
@@ -473,14 +452,8 @@ namespace Microsoft.Boogie {
       Invalid,
       TimeOut,
       OutOfMemory,
-      OutOfResource,
-      Undetermined,
-      Bounded
+      Undetermined
     }
-
-    public readonly ISet<VCExprVar> NamedAssumes = new HashSet<VCExprVar>();
-    public ISet<string> UsedNamedAssumes { get; protected set; }
-
     public class ErrorHandler {
       // Used in CheckOutcomeCore
       public virtual int StartingProcId()
@@ -488,11 +461,11 @@ namespace Microsoft.Boogie {
           return 0;
       }
 
-      public virtual void OnModel(IList<string> labels, Model model, Outcome proverOutcome) {
+      public virtual void OnModel(IList<string> labels, Model model) {
         Contract.Requires(cce.NonNullElements(labels));
       }
 
-      public virtual void OnResourceExceeded(string message, IEnumerable<Tuple<AssertCmd, TransferCmd>> assertCmds = null) {
+      public virtual void OnResourceExceeded(string message) {
         Contract.Requires(message != null);
       }
 
@@ -525,7 +498,7 @@ namespace Microsoft.Boogie {
     
     public virtual Outcome CheckRPFP(string descriptiveName, RPFP vc, ErrorHandler handler,
                                      out RPFP.Node cex,
-                                     Dictionary<int, Dictionary<string, string>> varSubst, Dictionary<string,int> extra_bound = null)
+                                     Dictionary<int, Dictionary<string, string>> varSubst)
     {
         throw new System.NotImplementedException();
     }
@@ -571,7 +544,7 @@ namespace Microsoft.Boogie {
     }
 
     // (assert vc)
-    public virtual void Assert(VCExpr vc, bool polarity, bool isSoft = false, int weight = 1)
+    public virtual void Assert(VCExpr vc, bool polarity)
     {
         throw new NotImplementedException();
     }
@@ -613,9 +586,6 @@ namespace Microsoft.Boogie {
     public virtual void SetTimeOut(int ms)
     { }
 
-    public virtual void SetRlimit(int limit)
-    { }
-
     public abstract ProverContext Context {
       get;
     }
@@ -637,32 +607,6 @@ namespace Microsoft.Boogie {
     {
         throw new NotImplementedException();
     }
-
-    //////////////////////
-    // For interpolation queries
-    //////////////////////
-
-    // Assert vc tagged with a name
-    public virtual void AssertNamed(VCExpr vc, bool polarity, string name)
-    {
-        throw new NotImplementedException();
-    }
-
-    // Returns Interpolant(A,B)
-    public virtual VCExpr ComputeInterpolant(VCExpr A, VCExpr B)
-    {
-        throw new NotImplementedException();
-    }
-
-    // Returns for each l, Interpolant(root + (leaves - l), l)
-    // Preconditions:
-    //    leaves cannot have subformulas with same variable names
-    //    Both root and leaves should have been previously named via AssertNamed
-    public virtual List<VCExpr> GetTreeInterpolant(List<string> root, List<string> leaves)
-    {
-        throw new NotImplementedException();
-    }
-
   }
 
   public class ProverInterfaceContracts : ProverInterface {

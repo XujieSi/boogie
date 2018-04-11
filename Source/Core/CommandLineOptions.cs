@@ -1,4 +1,4 @@
-﻿//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 //
 // Copyright (C) Microsoft Corporation.  All Rights Reserved.
 //
@@ -11,46 +11,22 @@ using System.IO;
 using System.Linq;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
-using System.Text.RegularExpressions;
 
 namespace Microsoft.Boogie {
   public class CommandLineOptionEngine
   {
     public readonly string ToolName;
     public readonly string DescriptiveToolName;
-
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(ToolName != null);
       Contract.Invariant(DescriptiveToolName != null);
-      Contract.Invariant(this._environment != null);
-      Contract.Invariant(cce.NonNullElements(this._files));
-      Contract.Invariant(this._fileTimestamp != null);
+      Contract.Invariant(Environment != null);
+      Contract.Invariant(cce.NonNullElements(Files));
     }
 
-    private string/*!*/ _environment = "";
-
-    public string Environment {
-      get {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this._environment;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._environment = value;
-      }
-    }
-
-    private readonly List<string/*!*/>/*!*/ _files = new List<string/*!*/>();
-
-    public IList<string/*!*/>/*!*/ Files {
-      get {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IList<string>>()));
-        Contract.Ensures(Contract.Result<IList<string>>().IsReadOnly);
-        return this._files.AsReadOnly();
-      }
-    }
-
+    public string/*!*/ Environment = "";
+    public List<string/*!*/>/*!*/ Files = new List<string/*!*/>();
     public bool HelpRequested = false;
     public bool AttrHelpRequested = false;
 
@@ -70,7 +46,7 @@ namespace Microsoft.Boogie {
     public virtual string/*!*/ VersionSuffix {
       get {
         Contract.Ensures(Contract.Result<string>() != null);
-        return " version " + VersionNumber + ", Copyright (c) 2003-2014, Microsoft.";
+        return " version " + VersionNumber + ", Copyright (c) 2003-2013, Microsoft.";
       }
     }
     public virtual string/*!*/ Version {
@@ -80,19 +56,7 @@ namespace Microsoft.Boogie {
       }
     }
 
-    private string/*!*/ _fileTimestamp = cce.NonNull(DateTime.Now.ToString("o")).Replace(':', '.');
-
-    public string FileTimestamp {
-      get {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this._fileTimestamp;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._fileTimestamp = value;
-      }
-    }
-
+    public string/*!*/ FileTimestamp = cce.NonNull(DateTime.Now.ToString("o")).Replace(':', '.');
     public void ExpandFilename(ref string pattern, string logPrefix, string fileTimestamp) {
       if (pattern != null) {
         pattern = pattern.Replace("@PREFIX@", logPrefix).Replace("@TIME@", fileTimestamp);
@@ -183,22 +147,12 @@ namespace Microsoft.Boogie {
       /// </summary>
       public bool GetNumericArgument(ref int arg) {
         //modifies nextIndex, encounteredErrors, Console.Error.*;
-        return GetNumericArgument(ref arg, a => 0 <= a);
-      }
-
-      /// <summary>
-      /// If there is one argument and the filtering predicate holds, then set "arg" to that number and return "true".
-      /// Otherwise, emit error message, leave "arg" unchanged, and return "false".
-      /// </summary>
-      public bool GetNumericArgument(ref int arg, Predicate<int> filter) {
-        Contract.Requires(filter != null);
-
         if (this.ConfirmArgumentCount(1)) {
           try {
             Contract.Assume(args[i] != null);
             Contract.Assert(args[i] is string);  // needed to prove args[i].IsPeerConsistent
             int d = Convert.ToInt32(this.args[this.i]);
-            if (filter == null || filter(d)) {
+            if (0 <= d) {
               arg = d;
               return true;
             }
@@ -219,7 +173,6 @@ namespace Microsoft.Boogie {
       /// </summary>
       public bool GetNumericArgument(ref int arg, int limit) {
         Contract.Requires(this.i < args.Length);
-        Contract.Ensures(Math.Min(arg, 0) <= Contract.ValueAtReturn(out arg) && Contract.ValueAtReturn(out arg) < limit);
         //modifies nextIndex, encounteredErrors, Console.Error.*;
         int a = arg;
         if (!GetNumericArgument(ref a)) {
@@ -238,7 +191,6 @@ namespace Microsoft.Boogie {
       /// Otherwise, emit an error message, leave "arg" unchanged, and return "false".
       /// </summary>
       public bool GetNumericArgument(ref double arg) {
-        Contract.Ensures(Contract.ValueAtReturn(out arg) >= 0);
         //modifies nextIndex, encounteredErrors, Console.Error.*;
         if (this.ConfirmArgumentCount(1)) {
           try {
@@ -340,12 +292,12 @@ namespace Microsoft.Boogie {
         if (isOption) {
           if (!ParseOption(ps.s.Substring(1), ps)) {
             if (Path.DirectorySeparatorChar == '/' && ps.s.StartsWith("/"))
-              this._files.Add(arg);
+              Files.Add(arg);
             else
               ps.Error("unknown switch: {0}", ps.s);
           }
         } else {
-          this._files.Add(arg);
+          Files.Add(arg);
         }
 
         ps.i = ps.nextIndex;
@@ -374,6 +326,10 @@ namespace Microsoft.Boogie {
   /// superset of Boogie's options.
   /// </summary>
   public class CommandLineOptions : CommandLineOptionEngine {
+    [ContractInvariantMethod]
+    void ObjectInvariant() {
+      Contract.Invariant(FileTimestamp != null);
+    }
 
     public CommandLineOptions()
       : base("Boogie", "Boogie program verifier") {
@@ -408,19 +364,17 @@ namespace Microsoft.Boogie {
       Contract.Invariant(0 <= PrintUnstructured && PrintUnstructured < 3);  // 0 = print only structured,  1 = both structured and unstructured,  2 = only unstructured
     }
 
-    public int VerifySnapshots = -1;
-    public bool VerifySeparately = false;
+    public bool VerifySnapshots;
+    public bool VerifySeparately;
     public string PrintFile = null;
     public int PrintUnstructured = 0;
-    public bool UseBaseNameForFileName = false;
     public int DoomStrategy = -1;
     public bool DoomRestartTP = false;
     public bool PrintDesugarings = false;
     public string SimplifyLogFilePath = null;
+    public string/*!*/ LogPrefix = "";
     public bool PrintInstrumented = false;
     public bool InstrumentWithAsserts = false;
-    public string ProverPreamble = null;
-
     public enum InstrumentationPlaces {
       LoopHeaders,
       Everywhere
@@ -434,28 +388,6 @@ namespace Microsoft.Boogie {
     public bool Trace = false;
     public bool TraceTimes = false;
     public bool TraceProofObligations = false;
-    public bool TraceCachingForTesting
-    {
-      get
-      {
-        return TraceCaching == 1 || TraceCaching == 3;
-      }
-    }
-    public bool TraceCachingForBenchmarking
-    {
-      get
-      {
-        return TraceCaching == 2 || TraceCaching == 3;
-      }
-    }
-    public bool TraceCachingForDebugging
-    {
-      get
-      {
-        return TraceCaching == 3;
-      }
-    }
-    internal int TraceCaching = 0;
     public bool NoResolve = false;
     public bool NoTypecheck = false;
     public bool OverlookBoogieTypeErrors = false;
@@ -465,7 +397,6 @@ namespace Microsoft.Boogie {
     public bool IntraproceduralInfer = true;
     public bool ContractInfer = false;
     public bool ExplainHoudini = false;
-    public bool ReverseHoudiniWorklist = false;
     public bool ConcurrentHoudini = false;
     public bool ModifyTopologicalSorting = false;
     public bool DebugConcurrentHoudini = false;
@@ -473,39 +404,23 @@ namespace Microsoft.Boogie {
     public string StagedHoudini = null;
     public bool DebugStagedHoudini = false;
     public bool StagedHoudiniReachabilityAnalysis = false;
-    public bool StagedHoudiniMergeIgnoredAnnotations = false;
-    public int StagedHoudiniThreads = 1;
+    public bool StagedHoudiniMergeIgnoredCandidates = false;
+    public int StagedHoudiniThreads = 2;
     public string VariableDependenceIgnore = null;
     public string AbstractHoudini = null;
-    public string DLHoudini = null;
+    public string ICEHoudini = null;
+    public string MLHoudini = null;
+    public bool MLHoudiniUseBounds = true;
+    public string MLHoudiniSymb = null;
     public bool UseUnsatCoreForContractInfer = false;
     public bool PrintAssignment = false;
-    // TODO(wuestholz): Add documentation for this flag.
-    public bool PrintNecessaryAssumes = false;
     public int InlineDepth = -1;
     public bool UseProverEvaluate = false; // Use ProverInterface's Evaluate method, instead of model to get variable values
     public bool UseUncheckedContracts = false;
     public bool SimplifyLogFileAppend = false;
     public bool SoundnessSmokeTest = false;
     public string Z3ExecutablePath = null;
-    public string Z3ExecutableName = null;
     public string CVC4ExecutablePath = null;
-    public int KInductionDepth = -1;
-
-    private string/*!*/ _logPrefix = "";
-
-    public string LogPrefix {
-      get {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this._logPrefix;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._logPrefix = value;
-      }
-    }
-
-    public bool PrettyPrint = true;
 
     public enum ProverWarnings {
       None,
@@ -531,7 +446,6 @@ namespace Microsoft.Boogie {
     }
     public ShowEnvironment ShowEnv = ShowEnvironment.DuringPrint;
     public bool DontShowLogo = false;
-    public bool ShowVerifiedProcedureCount = true;
     [ContractInvariantMethod]
     void ObjectInvariant3() {
       Contract.Invariant(-1 <= LoopFrameConditions && LoopFrameConditions < 3);
@@ -539,8 +453,8 @@ namespace Microsoft.Boogie {
       Contract.Invariant((0 <= PrintErrorModel && PrintErrorModel <= 2) || PrintErrorModel == 4);
       Contract.Invariant(0 <= EnhancedErrorMessages && EnhancedErrorMessages < 2);
       Contract.Invariant(0 <= StepsBeforeWidening && StepsBeforeWidening <= 9);
-      Contract.Invariant(-1 <= this.bracketIdsInVC && this.bracketIdsInVC <= 1);
-      Contract.Invariant(cce.NonNullElements(this.proverOptions));
+      Contract.Invariant(-1 <= BracketIdsInVC && BracketIdsInVC < 2);
+      Contract.Invariant(cce.NonNullElements(ProverOptions));
     }
 
     public int LoopUnrollCount = -1;  // -1 means don't unroll loops
@@ -565,10 +479,6 @@ namespace Microsoft.Boogie {
     public bool UseSmtOutputFormat = false;
     public bool WeakArrayTheory = false;
     public bool UseLabels = true;
-    public bool RunDiagnosticsOnTimeout = false;
-    public bool TraceDiagnosticsOnTimeout = false;
-    public int TimeLimitPerAssertionInPercent = 10;
-    public bool SIBoolControlVC = false;
     public bool MonomorphicArrays {
       get {
         return UseArrayTheory || TypeEncodingMethod == TypeEncoding.Monomorphic;
@@ -577,27 +487,9 @@ namespace Microsoft.Boogie {
     public bool ExpandLambdas = true; // not useful from command line, only to be set to false programatically
     public bool DoModSetAnalysis = false;
     public bool UseAbstractInterpretation = true;          // true iff the user want to use abstract interpretation
-    private int  /*0..9*/stepsBeforeWidening = 0;           // The number of steps that must be done before applying a widen operator
+    public int  /*0..9*/StepsBeforeWidening = 0;           // The number of steps that must be done before applying a widen operator
 
-    public int StepsBeforeWidening
-    {
-      get
-      {
-        Contract.Ensures(0 <= Contract.Result<int>() && Contract.Result<int>() <= 9);
-        return this.stepsBeforeWidening;
-      }
-      set
-      {
-        Contract.Requires(0 <= value && value <= 9);
-        this.stepsBeforeWidening = value;
-      }
-    }
-
-    public string CivlDesugaredFile = null;
-    public bool TrustAtomicityTypes = false;
-    public bool TrustNonInterference = false;
-    public int TrustLayersUpto = -1;
-    public int TrustLayersDownto = int.MaxValue;
+    public string OwickiGriesDesugaredOutputFile = null;
 
     public enum VCVariety {
       Structured,
@@ -621,57 +513,13 @@ namespace Microsoft.Boogie {
     public ProverFactory TheProverFactory;
     public string ProverName;
     [Peer]
-    private List<string> proverOptions = new List<string>();
+    public List<string/*!*/>/*!*/ ProverOptions = new List<string/*!*/>();
 
-    public IEnumerable<string> ProverOptions
-    {
-      set
-      {
-        Contract.Requires(cce.NonNullElements(value));
-
-        this.proverOptions = new List<string>(value);
-      }
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<string>>()));
-
-        foreach (string s in this.proverOptions)
-          yield return s;
-      }
-    }
-
-    [Obsolete("use the setter for 'ProverOptions' directly")]
-    public void AddProverOption(string option)
-    {
-      Contract.Requires(option != null);
-
-      this.ProverOptions = this.ProverOptions.Concat1(option);
-    }
-
-    [Obsolete("use the setter for 'ProverOptions' directly")]
-    public void RemoveAllProverOptions(Predicate<string> match)
-    {
-      this.ProverOptions = this.ProverOptions.Where(s => !match(s));
-    }
-
-    private int bracketIdsInVC = -1;  // -1 - not specified, 0 - no, 1 - yes
-
-    public int BracketIdsInVC {
-      get {
-        Contract.Ensures(-1 <= Contract.Result<int>() && Contract.Result<int>() <= 1);
-        return this.bracketIdsInVC;
-      }
-      set {
-        Contract.Requires(-1 <= value && value <= 1);
-        this.bracketIdsInVC = value;
-      }
-    }
-
+    public int BracketIdsInVC = -1;  // -1 - not specified, 0 - no, 1 - yes
     public bool CausalImplies = false;
 
     public int SimplifyProverMatchDepth = -1;  // -1 means not specified
     public int ProverKillTime = -1;  // -1 means not specified
-    public int Resourcelimit = 0; // default to 0
     public int SmokeTimeout = 10; // default to 10s
     public int ProverCCLimit = 5;
     public bool z3AtFlag = true;
@@ -701,29 +549,12 @@ namespace Microsoft.Boogie {
     }
     [ContractInvariantMethod]
     void ObjectInvariant4() {
-      Contract.Invariant(cce.NonNullElements(this.z3Options));
+      Contract.Invariant(cce.NonNullElements(Z3Options));
       Contract.Invariant(0 <= Z3lets && Z3lets < 4);
     }
 
     [Peer]
-    private List<string> z3Options = new List<string>();
-
-    public IEnumerable<string> Z3Options
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<IEnumerable<string>>() != null);
-        foreach (string s in z3Options)
-          yield return s;
-      }
-    }
-
-    public void AddZ3Option(string option)
-    {
-      Contract.Requires(option != null);
-      this.z3Options.Add(option);
-    }
-
+    public List<string/*!*/>/*!*/ Z3Options = new List<string/*!*/>();
     public bool Z3types = false;
     public int Z3lets = 3;  // 0 - none, 1 - only LET TERM, 2 - only LET FORMULA, 3 - (default) any
 
@@ -758,7 +589,6 @@ namespace Microsoft.Boogie {
     public bool PrintInlined = false;
     public bool ExtractLoops = false;
     public bool DeterministicExtractLoops = false;
-    public string SecureVcGen = null;
     public int StratifiedInlining = 0;
     public string FixedPointEngine = null;
     public int StratifiedInliningOption = 0;
@@ -766,7 +596,6 @@ namespace Microsoft.Boogie {
     public int StratifiedInliningVerbose = 0; // verbosity level
     public int RecursionBound = 500;
     public bool NonUniformUnfolding = false;
-    public int StackDepthBound = 0; 
     public string inferLeastForUnsat = null;
 
     // Inference mode for fixed point engine
@@ -778,12 +607,6 @@ namespace Microsoft.Boogie {
        Call
     };
     public FixedPointInferenceMode FixedPointMode = FixedPointInferenceMode.Procedure;
-		
-    public string PrintFixedPoint = null;
-
-    public string PrintConjectures = null;
-		
-    public bool ExtractLoopsUnrollIrreducible = true; // unroll irreducible loops? (set programmatically)
 
     public enum TypeEncoding {
       None,
@@ -809,18 +632,10 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public IEnumerable<string/*!*/> ProcsToCheck {
-      get {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<string/*!*/>>(), true));
-        return this.procsToCheck != null ? this.procsToCheck.AsEnumerable() : null;
-      }
-    }
-
-    private List<string/*!*/> procsToCheck = null;  // null means "no restriction"
-    
+    public List<string/*!*/> ProcsToCheck = null;  // null means "no restriction"
     [ContractInvariantMethod]
     void ObjectInvariant5() {
-      Contract.Invariant(cce.NonNullElements(this.procsToCheck, true));
+      Contract.Invariant(cce.NonNullElements(ProcsToCheck, true));
       Contract.Invariant(Ai != null);
     }
 
@@ -829,7 +644,7 @@ namespace Microsoft.Boogie {
       public bool J_Intervals = false;
       public bool DebugStatistics = false;
     }
-    public readonly AiFlags/*!*/ Ai = new AiFlags();
+    public AiFlags/*!*/ Ai = new AiFlags();
 
     public class ConcurrentHoudiniOptions
     {
@@ -894,11 +709,11 @@ namespace Microsoft.Boogie {
           return true;
 
         case "proc":
-          if (this.procsToCheck == null) {
-            this.procsToCheck = new List<string/*!*/>();
+          if (ProcsToCheck == null) {
+            ProcsToCheck = new List<string/*!*/>();
           }
           if (ps.ConfirmArgumentCount(1)) {
-            this.procsToCheck.Add(cce.NonNull(args[ps.i]));
+            ProcsToCheck.Add(cce.NonNull(args[ps.i]));
           }
           return true;
 
@@ -914,30 +729,9 @@ namespace Microsoft.Boogie {
           }
           return true;
 
-        case "pretty":
-          int val = 1;
-          if (ps.GetNumericArgument(ref val, 2)) {
-            PrettyPrint = val == 1;
-          } 
-          return true;
-
-        case "CivlDesugaredFile":
+        case "OwickiGries":
           if (ps.ConfirmArgumentCount(1)) {
-              CivlDesugaredFile = args[ps.i];
-          }
-          return true;
-
-        case "trustLayersUpto":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              ps.GetNumericArgument(ref TrustLayersUpto);
-          }
-          return true;
-
-        case "trustLayersDownto":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              ps.GetNumericArgument(ref TrustLayersDownto);
+              OwickiGriesDesugaredOutputFile = args[ps.i];
           }
           return true;
 
@@ -947,14 +741,7 @@ namespace Microsoft.Boogie {
           }
           return true;
 
-        case "proverPreamble": 
-          if (ps.ConfirmArgumentCount(1))
-          {
-            ProverPreamble = args[ps.i];
-          }
-           return true;
-          
-          case "logPrefix":
+        case "logPrefix":
           if (ps.ConfirmArgumentCount(1)) {
             string s = cce.NonNull(args[ps.i]);
             LogPrefix += s.Replace('/', '-').Replace('\\', '-');
@@ -1013,14 +800,6 @@ namespace Microsoft.Boogie {
             return true;
           }
 
-        case "printVerifiedProceduresCount": {
-            int n = 0;
-            if (ps.GetNumericArgument(ref n, 2)) {
-              ShowVerifiedProcedureCount = n != 0;
-            }
-            return true;
-          }
-
         case "loopUnroll":
           ps.GetNumericArgument(ref LoopUnrollCount);
           return true;
@@ -1067,10 +846,6 @@ namespace Microsoft.Boogie {
           if (ps.ConfirmArgumentCount(1)) {
             PrintCFGPrefix = args[ps.i];
           }
-          return true;
-
-        case "normalArg":
-            Parser.S = false;
           return true;
 
         case "inlineDepth":
@@ -1155,9 +930,9 @@ namespace Microsoft.Boogie {
             return true;
           }
 
-        case "stagedHoudiniMergeIgnoredAnnotations": {
+        case "stagedHoudiniMergeIgnoredCandidates": {
             if (ps.ConfirmArgumentCount(0)) {
-              StagedHoudiniMergeIgnoredAnnotations = true;
+              StagedHoudiniMergeIgnoredCandidates = true;
             }
             return true;
           }
@@ -1184,11 +959,35 @@ namespace Microsoft.Boogie {
                 }
                 return true;
             }
-        case "dlHoudini" : 
+        case "ice":
             {
-                if(ps.ConfirmArgumentCount(1))
+                if (ps.ConfirmArgumentCount(1))
                 {
-                    DLHoudini = args[ps.i];
+                    ICEHoudini = args[ps.i];
+                }
+                return true;
+            }
+        case "mlHoudini":
+            {
+                if (ps.ConfirmArgumentCount(1))
+                {
+                    MLHoudini = args[ps.i];
+                }
+                return true;
+            }
+        case "mlHoudiniUseBounds":
+            {
+                if (ps.ConfirmArgumentCount(1))
+                {
+                    MLHoudiniUseBounds = Convert.ToBoolean(args[ps.i]);
+                }
+                return true;
+            }
+        case "mlHoudiniSymb":
+            {
+                if (ps.ConfirmArgumentCount(1))
+                {
+                    MLHoudiniSymb = args[ps.i];
                 }
                 return true;
             }
@@ -1244,7 +1043,7 @@ namespace Microsoft.Boogie {
         case "p":
         case "proverOpt":
           if (ps.ConfirmArgumentCount(1)) {
-            ProverOptions = ProverOptions.Concat1(cce.NonNull(args[ps.i]));
+            ProverOptions.Add(cce.NonNull(args[ps.i]));
           }
           return true;
 
@@ -1270,6 +1069,9 @@ namespace Microsoft.Boogie {
           }
           return true;
 
+        case "normalArg": Parser.S = false;
+          return true;
+
         case "inline":
           if (ps.ConfirmArgumentCount(1)) {
             switch (args[ps.i]) {
@@ -1291,10 +1093,7 @@ namespace Microsoft.Boogie {
             }
           }
           return true;
-        case "secure":
-          if (ps.ConfirmArgumentCount(1))
-              SecureVcGen = args[ps.i];
-          return true;
+
         case "stratifiedInline":
           if (ps.ConfirmArgumentCount(1)) {
             switch (args[ps.i]) {
@@ -1343,18 +1142,6 @@ namespace Microsoft.Boogie {
               }
           }
           return true;
-        case "printFixedPoint":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              PrintFixedPoint = args[ps.i];
-          }
-          return true;
-        case "printConjectures":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              PrintConjectures = args[ps.i];
-          }
-          return true;
         case "siVerbose":
           if (ps.ConfirmArgumentCount(1)) {
             StratifiedInliningVerbose = Int32.Parse(cce.NonNull(args[ps.i]));
@@ -1365,12 +1152,7 @@ namespace Microsoft.Boogie {
             RecursionBound = Int32.Parse(cce.NonNull(args[ps.i]));
           }
           return true;
-        case "stackDepthBound":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              StackDepthBound = Int32.Parse(cce.NonNull(args[ps.i]));
-          }
-          return true;
+
         case "stratifiedInlineOption":
           if (ps.ConfirmArgumentCount(1)) {
             StratifiedInliningOption = Int32.Parse(cce.NonNull(args[ps.i]));
@@ -1444,7 +1226,7 @@ namespace Microsoft.Boogie {
           return true;
 
         case "vcBrackets":
-          ps.GetNumericArgument(ref bracketIdsInVC, 2);
+          ps.GetNumericArgument(ref BracketIdsInVC, 2);
           return true;
 
         case "proverMemoryLimit": {
@@ -1492,7 +1274,7 @@ namespace Microsoft.Boogie {
           return true;
 
         case "vcsCores":
-          ps.GetNumericArgument(ref VcsCores, a => 1 <= a);
+          ps.GetNumericArgument(ref VcsCores);
           return true;
 
         case "vcsLoad":
@@ -1515,28 +1297,12 @@ namespace Microsoft.Boogie {
           ps.GetNumericArgument(ref ProverKillTime);
           return true;
 
-        case "rlimit":
-          ps.GetNumericArgument(ref Resourcelimit);
-          return true;
-
-        case "timeLimitPerAssertionInPercent":
-          ps.GetNumericArgument(ref TimeLimitPerAssertionInPercent, a => 0 < a);
-          return true;
-
         case "smokeTimeout":
           ps.GetNumericArgument(ref SmokeTimeout);
           return true;
 
         case "errorLimit":
           ps.GetNumericArgument(ref ProverCCLimit);
-          return true;
-
-        case "verifySnapshots":
-          ps.GetNumericArgument(ref VerifySnapshots, 4);
-          return true;
-
-        case "traceCaching":
-          ps.GetNumericArgument(ref TraceCaching, 4);
           return true;
 		
 		case "useSmtOutputFormat": {
@@ -1548,7 +1314,7 @@ namespace Microsoft.Boogie {
 		
         case "z3opt":
           if (ps.ConfirmArgumentCount(1)) {
-            AddZ3Option(cce.NonNull(args[ps.i]));
+            Z3Options.Add(cce.NonNull(args[ps.i]));
           }
           return true;
 
@@ -1582,23 +1348,12 @@ namespace Microsoft.Boogie {
             Z3ExecutablePath = args[ps.i];
           }
           return true;
-         // This sets name of z3 binary boogie binary directory, not path
-        case "z3name":
-          if (ps.ConfirmArgumentCount(1))
-          {
-              Z3ExecutableName = args[ps.i];
-          }
-          return true;
 
-        case "cvc4exe":
+		case "cvc4exe":
 			if (ps.ConfirmArgumentCount(1)) {
 				CVC4ExecutablePath = args[ps.i];
 			}
 			return true;
-
-        case "kInductionDepth":
-          ps.GetNumericArgument(ref KInductionDepth);
-          return true;
 
         default:
           bool optionValue = false;
@@ -1639,23 +1394,16 @@ namespace Microsoft.Boogie {
               ps.CheckBooleanFlag("weakArrayTheory", ref WeakArrayTheory) || 
               ps.CheckBooleanFlag("doModSetAnalysis", ref DoModSetAnalysis) ||
               ps.CheckBooleanFlag("doNotUseLabels", ref UseLabels, false) ||
-              ps.CheckBooleanFlag("runDiagnosticsOnTimeout", ref RunDiagnosticsOnTimeout) ||
-              ps.CheckBooleanFlag("traceDiagnosticsOnTimeout", ref TraceDiagnosticsOnTimeout) ||
-              ps.CheckBooleanFlag("boolControlVC", ref SIBoolControlVC, true) ||
               ps.CheckBooleanFlag("contractInfer", ref ContractInfer) ||
               ps.CheckBooleanFlag("explainHoudini", ref ExplainHoudini) ||
-              ps.CheckBooleanFlag("reverseHoudiniWorklist", ref ReverseHoudiniWorklist) ||
               ps.CheckBooleanFlag("crossDependencies", ref HoudiniUseCrossDependencies) ||
               ps.CheckBooleanFlag("useUnsatCoreForContractInfer", ref UseUnsatCoreForContractInfer) ||
               ps.CheckBooleanFlag("printAssignment", ref PrintAssignment) ||
-              ps.CheckBooleanFlag("printNecessaryAssumes", ref PrintNecessaryAssumes) ||
               ps.CheckBooleanFlag("useProverEvaluate", ref UseProverEvaluate) ||
               ps.CheckBooleanFlag("nonUniformUnfolding", ref NonUniformUnfolding) ||
               ps.CheckBooleanFlag("deterministicExtractLoops", ref DeterministicExtractLoops) ||
-              ps.CheckBooleanFlag("verifySeparately", ref VerifySeparately) ||
-              ps.CheckBooleanFlag("trustAtomicityTypes", ref TrustAtomicityTypes) ||
-              ps.CheckBooleanFlag("trustNonInterference", ref TrustNonInterference) ||
-              ps.CheckBooleanFlag("useBaseNameForFileName", ref UseBaseNameForFileName)
+              ps.CheckBooleanFlag("verifySnapshots", ref VerifySnapshots) ||
+              ps.CheckBooleanFlag("verifySeparately", ref VerifySeparately)
               ) {
             // one of the boolean flags matched
             return true;
@@ -1731,7 +1479,7 @@ namespace Microsoft.Boogie {
         // no preference
         return true;
       }
-      return ProcsToCheck.Any(s => Regex.IsMatch(methodFullname, "^" + Regex.Escape(s).Replace(@"\*", ".*") + "$"));
+      return ProcsToCheck.Any(s => 0 <= methodFullname.IndexOf(s));
     }
 
     public virtual StringCollection ParseNamedArgumentList(string argList) {
@@ -1826,9 +1574,6 @@ namespace Microsoft.Boogie {
      {:timeLimit N}
        Set the time limit for a given implementation.
 
-     {:rlimit N}
-       Set the Z3 resource limit for a given implementation.
-
   ---- On functions ----------------------------------------------------------
 
      {:builtin ""spec""}
@@ -1868,11 +1613,6 @@ namespace Microsoft.Boogie {
      {:subsumption n}
        Overrides the /subsumption command-line setting for this assertion.
 
-     {:split_here}
-       Verifies code leading to this point and code leading from this point
-       to the next split_here as separate pieces.  May help with timeouts.
-       May also occasionally double-report errors.
-
   ---- The end ---------------------------------------------------------------
 ");
     }
@@ -1883,9 +1623,6 @@ namespace Microsoft.Boogie {
   /env:<n>      print command line arguments
                   0 - never, 1 (default) - during BPL print and prover log,
                   2 - like 1 and also to standard output
-  /printVerifiedProceduresCount:<n>
-                0 - no
-                1 (default) - yes
   /wait         await Enter from keyboard before terminating program
   /xml:<file>   also produce output in XML format to <file>
 
@@ -1894,23 +1631,12 @@ namespace Microsoft.Boogie {
   Multiple .bpl files supplied on the command line are concatenated into one
   Boogie program.
 
-  /proc:<p>      : Only check procedures matched by pattern <p>. This option
-                   may be specified multiple times to match multiple patterns.
-                   The pattern <p> matches the whole procedure name (i.e.
-                   pattern ""foo"" will only match a procedure called foo and
-                   not fooBar). The pattern <p> may contain * wildcards which
-                   match any character zero or more times. For example the
-                   pattern ""ab*d"" would match abd, abcd and abccd but not
-                   Aabd nor abdD. The pattern ""*ab*d*"" would match abd,
-                   abcd, abccd, Abd and abdD.
+  /proc:<p>      : limits which procedures to check
   /noResolve     : parse only
   /noTypecheck   : parse and resolve only
 
   /print:<file>  : print Boogie program after parsing it
                    (use - as <file> to print to console)
-  /pretty:<n>
-                0 - print each Boogie statement on one line (faster).
-                1 (default) - pretty-print with some line breaks.
   /printWithUniqueIds : print augmented information that uniquely
                    identifies variables
   /printUnstructured : with /print option, desugars all structured statements
@@ -1938,9 +1664,6 @@ namespace Microsoft.Boogie {
   /printCFG:<prefix> : print control flow graph of each implementation in
                        Graphviz format to files named:
                          <prefix>.<procedure name>.dot
-
-  /useBaseNameForFileName : When parsing use basename of file for tokens instead
-                            of the path supplied on the command line
 
   ---- Inference options -----------------------------------------------------
 
@@ -1993,19 +1716,6 @@ namespace Microsoft.Boogie {
 
   /break        launch and break into debugger
 
-  ---- CIVL options ----------------------------------------------------------
-
-  /trustAtomicityTypes
-                do not verify atomic action declarations
-  /trustNonInterference
-                do not perform noninterference checks
-  /trustLayersUpto:<n>
-                do not verify layers <n> and below
-  /trustLayersDownto:<n>
-                do not verify layers <n> and above
-  /CivlDesugaredFile:<file>
-                print plain Boogie program to <file>
-
   ---- Verification-condition generation options -----------------------------
 
   /liveVariableAnalysis:<c>
@@ -2013,21 +1723,9 @@ namespace Microsoft.Boogie {
                 1 = perform live variable analysis (default)
                 2 = perform interprocedural live variable analysis
   /noVerify     skip VC generation and invocation of the theorem prover
-  /verifySnapshots:<n>
+  /verifySnapshots
                 verify several program snapshots (named <filename>.v0.bpl
-                to <filename>.vN.bpl) using verification result caching:
-                0 - do not use any verification result caching (default)
-                1 - use the basic verification result caching
-                2 - use the more advanced verification result caching
-                3 - use the more advanced caching and report errors according
-                    to the new source locations for errors and their
-                    related locations (but not /errorTrace and CaptureState
-                    locations) 
-  /traceCaching:<n>
-                0 (default) - none
-                1 - for testing
-                2 - for benchmarking
-                3 - for testing, benchmarking, and debugging
+                to <filename>.vN.bpl) using verification result caching
   /verifySeparately
                 verify each input program separately
   /removeEmptyBlocks:<c>
@@ -2156,8 +1854,6 @@ namespace Microsoft.Boogie {
   /timeLimit:<num>
                 Limit the number of seconds spent trying to verify
                 each procedure
-  /rlimit:<num>
-                Limit the Z3 resource spent trying to verify each procedure
   /errorTrace:<n>
                 0 - no Trace labels in the error output,
                 1 (default) - include useful Trace labels in error output,

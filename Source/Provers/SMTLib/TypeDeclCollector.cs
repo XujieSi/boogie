@@ -18,7 +18,7 @@ namespace Microsoft.Boogie.SMTLib
 
   public class TypeDeclCollector : BoundVarTraversingVCExprVisitor<bool, bool> {
 
-    private UniqueNamer Namer;
+    private readonly UniqueNamer Namer;
     private readonly SMTLibProverOptions Options;
     private HashSet<Function/*!*/>/*!*/ RegisteredRelations = new HashSet<Function>();
 
@@ -90,19 +90,7 @@ void ObjectInvariant()
     private readonly Stack<HashSet<string/*!*/>/*!*/> _KnownStoreFunctions = new Stack<HashSet<string>>();
     private readonly Stack<HashSet<string/*!*/>/*!*/> _KnownSelectFunctions = new Stack<HashSet<string>>();
     private readonly Stack<HashSet<string>> _KnownLBL = new Stack<HashSet<string>>();
-		
-	// lets RPFP checker capture decls	
-	public abstract class DeclHandler {
-		public abstract void VarDecl(VCExprVar v);
-		public abstract void FuncDecl(Function f);
-	}
-		
-	private DeclHandler declHandler = null;
 
-	public void SetDeclHandler(DeclHandler _d){
-		declHandler = _d;
-	}
-		
     private void InitializeKnownDecls()
     {
         _KnownFunctions.Push(new HashSet<Function>());
@@ -146,11 +134,6 @@ void ObjectInvariant()
         _KnownStoreFunctions.Pop();
         _KnownSelectFunctions.Pop();
         _KnownLBL.Pop();
-    }
-
-    public void SetNamer(UniqueNamer namer)
-    {
-      Namer = namer;
     }
 
     public List<string/*!>!*/> AllDeclarations { get {
@@ -199,8 +182,6 @@ void ObjectInvariant()
       if (KnownFunctions.Contains(func))
         return;
       KnownFunctions.Add(func);
-	  if(declHandler != null)
-		declHandler.FuncDecl(func);
     }
 
     public void RegisterRelation(Function func)
@@ -215,18 +196,7 @@ void ObjectInvariant()
 
       if (node.Op is VCExprStoreOp) RegisterStore(node);
       else if (node.Op is VCExprSelectOp) RegisterSelect(node);
-      else if (node.Op is VCExprSoftOp) {
-        var exprVar = node[0] as VCExprVar;
-        AddDeclaration(string.Format("(declare-fun {0} () Bool)", exprVar.Name));
-        AddDeclaration(string.Format("(assert-soft {0} :weight {1})", exprVar.Name, ((VCExprSoftOp)node.Op).Weight));
-      } else if (node.Op.Equals(VCExpressionGenerator.NamedAssumeOp)) {
-        var exprVar = node[0] as VCExprVar;
-        AddDeclaration(string.Format("(declare-fun {0} () Bool)", exprVar.Name));
-        if (CommandLineOptions.Clo.PrintNecessaryAssumes)
-        {
-          AddDeclaration(string.Format("(assert (! {0} :named {1}))", exprVar.Name, "aux$$" + exprVar.Name));
-        }
-      } else {
+      else {
         VCExprBoogieFunctionOp op = node.Op as VCExprBoogieFunctionOp;
         if (op != null && 
           !(op.Func is DatatypeConstructor) && !(op.Func is DatatypeMembership) && !(op.Func is DatatypeSelector) && 
@@ -247,14 +217,13 @@ void ObjectInvariant()
             else
                 decl = "(declare-fun " + printedName + " (" + argTypes + ") " + TypeToStringReg(f.OutParams[0].TypedIdent.Type) + ")";
             AddDeclaration(decl);
-            if (declHandler != null) declHandler.FuncDecl(f);
           }
           KnownFunctions.Add(f);
         } else {
           var lab = node.Op as VCExprLabelOp;
           if (lab != null && !KnownLBL.Contains(lab.label)) {
             KnownLBL.Add(lab.label);
-            var name = SMTLibNamer.QuoteId(Namer.LabelVar(lab.label));
+            var name = SMTLibNamer.QuoteId(SMTLibNamer.LabelVar(lab.label));
             AddDeclaration("(declare-fun " + name + " () Bool)");
           }
         }
@@ -271,13 +240,8 @@ void ObjectInvariant()
         RegisterType(node.Type);
         string decl =
           "(declare-fun " + printedName + " () " + TypeToString(node.Type) + ")";
-        if (!(printedName.StartsWith("assume$$") || printedName.StartsWith("soft$$") || printedName.StartsWith("try$$")))
-        {
-          AddDeclaration(decl);
-        }
+        AddDeclaration(decl);
         KnownVariables.Add(node);
-		if(declHandler != null)
-			declHandler.VarDecl(node);
       }
 
       return base.Visit(node, arg);
@@ -316,7 +280,7 @@ void ObjectInvariant()
         return;
       }
 
-      if (type.IsBool || type.IsInt || type.IsReal || type.IsBv || type.IsFloat || type.IsRMode)
+      if (type.IsBool || type.IsInt || type.IsReal || type.IsBv)
         return;
 
       CtorType ctorType = type as CtorType;

@@ -72,6 +72,7 @@ namespace Microsoft.Boogie {
       Contract.Invariant(Context != null);
       Contract.Invariant(cce.NonNullElements(relatedInformation));
       Contract.Invariant(cce.NonNullDictionaryAndValues(calleeCounterexamples));
+      Contract.Invariant(AssumedCmds != null);
     }
 
     [Peer]
@@ -81,13 +82,13 @@ namespace Microsoft.Boogie {
     public ProverContext Context;
     [Peer]
     public List<string>/*!>!*/ relatedInformation;
-    public string OriginalRequestId;
     public string RequestId;
-    public abstract byte[] Checksum { get; }
-    public byte[] SugaredCmdChecksum;
-    public bool IsAuxiliaryCexForDiagnosingTimeouts;
 
     public Dictionary<TraceLocation, CalleeCounterexampleInfo> calleeCounterexamples;
+
+    // New data member added to account for assume cmds encountered along the Trace.
+    [Peer]
+    public List<Cmd> AssumedCmds;
 
     internal Counterexample(List<Block> trace, Model model, VC.ModelViewInfo mvInfo, ProverContext context) {
       Contract.Requires(trace != null);
@@ -98,6 +99,20 @@ namespace Microsoft.Boogie {
       this.Context = context;
       this.relatedInformation = new List<string>();
       this.calleeCounterexamples = new Dictionary<TraceLocation, CalleeCounterexampleInfo>();
+      this.AssumedCmds = new List<Cmd>();
+    }
+
+    internal Counterexample(List<Block> trace, List<Cmd> assumedCmds, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
+    {
+        Contract.Requires(trace != null);
+        Contract.Requires(context != null);
+        this.Trace = trace;
+        this.Model = model;
+        this.MvInfo = mvInfo;
+        this.Context = context;
+        this.relatedInformation = new List<string>();
+        this.calleeCounterexamples = new Dictionary<TraceLocation, CalleeCounterexampleInfo>();
+        this.AssumedCmds = assumedCmds;
     }
 
     // Create a shallow copy of the counterexample
@@ -242,7 +257,7 @@ namespace Microsoft.Boogie {
       ApplyRedirections(m); 
 
       var mvstates = m.TryGetFunc("$mv_state");
-      if (MvInfo == null || mvstates == null || (mvstates.Arity == 1 && mvstates.Apps.Count() == 0))
+      if (MvInfo == null || mvstates == null)
         return;
 
       Contract.Assert(mvstates.Arity == 2);
@@ -314,7 +329,7 @@ namespace Microsoft.Boogie {
     public abstract int GetLocation();
   }
 
-  public class CounterexampleComparer : IComparer<Counterexample>, IEqualityComparer<Counterexample> {
+  public class CounterexampleComparer : IComparer<Counterexample> {
 
     private int Compare(List<Block> bs1, List<Block> bs2)
     {
@@ -376,16 +391,6 @@ namespace Microsoft.Boogie {
       }
       return -1;
     }
-
-    public bool Equals(Counterexample x, Counterexample y)
-    {
-      return Compare(x, y) == 0;
-    }
-
-    public int GetHashCode(Counterexample obj)
-    {
-      return 0;
-    }
   }
 
   public class AssertCounterexample : Counterexample {
@@ -396,7 +401,6 @@ namespace Microsoft.Boogie {
       Contract.Invariant(FailingAssert != null);
     }
 
-
     public AssertCounterexample(List<Block> trace, AssertCmd failingAssert, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
       : base(trace, model, mvInfo, context) {
       Contract.Requires(trace != null);
@@ -405,18 +409,23 @@ namespace Microsoft.Boogie {
       this.FailingAssert = failingAssert;
     }
 
+    public AssertCounterexample(List<Block> trace, List<Cmd> assumedCmds, AssertCmd failingAssert, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
+        : base(trace, assumedCmds, model, mvInfo, context)
+    {
+        Contract.Requires(trace != null);
+        Contract.Requires(assumedCmds != null);
+        Contract.Requires(failingAssert != null);
+        Contract.Requires(context != null);
+        this.FailingAssert = failingAssert;
+    }
+
     public override int GetLocation() {
       return FailingAssert.tok.line * 1000 + FailingAssert.tok.col;
     }
 
-    public override byte[] Checksum
-    {
-      get { return FailingAssert.Checksum; }
-    }
-
     public override Counterexample Clone()
     {
-        var ret = new AssertCounterexample(Trace, FailingAssert, Model, MvInfo, Context);
+        var ret = new AssertCounterexample(Trace, AssumedCmds, FailingAssert, Model, MvInfo, Context);
         ret.calleeCounterexamples = calleeCounterexamples;
         return ret;
     }
@@ -432,7 +441,7 @@ namespace Microsoft.Boogie {
     }
 
 
-    public CallCounterexample(List<Block> trace, CallCmd failingCall, Requires failingRequires, Model model, VC.ModelViewInfo mvInfo, ProverContext context, byte[] checksum = null)
+    public CallCounterexample(List<Block> trace, CallCmd failingCall, Requires failingRequires, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
       : base(trace, model, mvInfo, context) {
       Contract.Requires(!failingRequires.Free);
       Contract.Requires(trace != null);
@@ -441,23 +450,28 @@ namespace Microsoft.Boogie {
       Contract.Requires(failingRequires != null);
       this.FailingCall = failingCall;
       this.FailingRequires = failingRequires;
-      this.checksum = checksum;
-      this.SugaredCmdChecksum = failingCall.Checksum;
+    }
+
+    public CallCounterexample(List<Block> trace, List<Cmd> assumedCmds, CallCmd failingCall, Requires failingRequires, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
+        : base(trace, assumedCmds, model, mvInfo, context)
+    {
+        Contract.Requires(!failingRequires.Free);
+        Contract.Requires(trace != null);
+        Contract.Requires(assumedCmds != null);
+        Contract.Requires(context != null);
+        Contract.Requires(failingCall != null);
+        Contract.Requires(failingRequires != null);
+        this.FailingCall = failingCall;
+        this.FailingRequires = failingRequires;
     }
 
     public override int GetLocation() {
       return FailingCall.tok.line * 1000 + FailingCall.tok.col;
     }
 
-    byte[] checksum;
-    public override byte[] Checksum
-    {
-      get { return checksum; }
-    }
-
     public override Counterexample Clone()
     {
-        var ret = new CallCounterexample(Trace, FailingCall, FailingRequires, Model, MvInfo, Context, Checksum);
+        var ret = new CallCounterexample(Trace, AssumedCmds, FailingCall, FailingRequires, Model, MvInfo, Context);
         ret.calleeCounterexamples = calleeCounterexamples;
         return ret;
     }
@@ -473,7 +487,7 @@ namespace Microsoft.Boogie {
     }
 
 
-    public ReturnCounterexample(List<Block> trace, TransferCmd failingReturn, Ensures failingEnsures, Model model, VC.ModelViewInfo mvInfo, ProverContext context, byte[] checksum)
+    public ReturnCounterexample(List<Block> trace, TransferCmd failingReturn, Ensures failingEnsures, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
       : base(trace, model, mvInfo, context) {
       Contract.Requires(trace != null);
       Contract.Requires(context != null);
@@ -482,29 +496,28 @@ namespace Microsoft.Boogie {
       Contract.Requires(!failingEnsures.Free);
       this.FailingReturn = failingReturn;
       this.FailingEnsures = failingEnsures;
-      this.checksum = checksum;
+    }
+
+    public ReturnCounterexample(List<Block> trace, List<Cmd> assumedCmds, TransferCmd failingReturn, Ensures failingEnsures, Model model, VC.ModelViewInfo mvInfo, ProverContext context)
+        : base(trace, assumedCmds, model, mvInfo, context)
+    {
+        Contract.Requires(trace != null);
+        Contract.Requires(assumedCmds != null);
+        Contract.Requires(context != null);
+        Contract.Requires(failingReturn != null);
+        Contract.Requires(failingEnsures != null);
+        Contract.Requires(!failingEnsures.Free);
+        this.FailingReturn = failingReturn;
+        this.FailingEnsures = failingEnsures;
     }
 
     public override int GetLocation() {
       return FailingReturn.tok.line * 1000 + FailingReturn.tok.col;
     }
 
-    byte[] checksum;
-
-    /// <summary>
-    /// Returns the checksum of the corresponding assertion.
-    /// </summary>
-    public override byte[] Checksum
-    {
-      get
-      {
-        return checksum;
-      }
-    }
-
     public override Counterexample Clone()
     {
-        var ret = new ReturnCounterexample(Trace, FailingReturn, FailingEnsures, Model, MvInfo, Context, checksum);
+        var ret = new ReturnCounterexample(Trace, AssumedCmds, FailingReturn, FailingEnsures, Model, MvInfo, Context);
         ret.calleeCounterexamples = calleeCounterexamples;
         return ret;
     }
@@ -523,11 +536,6 @@ namespace Microsoft.Boogie {
     }
 
     public virtual void OnOutOfMemory(string reason) {
-      Contract.Requires(reason != null);
-    }
-
-    public virtual void OnOutOfResource(string reason)
-    {
       Contract.Requires(reason != null);
     }
 
@@ -588,7 +596,6 @@ namespace VC {
       Correct,
       Errors,
       TimedOut,
-      OutOfResource,
       OutOfMemory,
       Inconclusive,
       ReachedBound
@@ -602,8 +609,6 @@ namespace VC {
           return Outcome.OutOfMemory;
         case ProverInterface.Outcome.TimeOut:
           return Outcome.TimedOut;
-        case ProverInterface.Outcome.OutOfResource:
-          return Outcome.OutOfResource;
         case ProverInterface.Outcome.Undetermined:
           return Outcome.Inconclusive;
         case ProverInterface.Outcome.Valid:
@@ -624,8 +629,6 @@ namespace VC {
     protected readonly List<Checker>/*!>!*/ checkers;
 
     private bool _disposed;
-
-    protected Implementation currentImplementation;
 
     protected List<Variable> CurrentLocalVariables = null;
 
@@ -664,7 +667,7 @@ namespace VC {
       CounterexampleCollector collector = new CounterexampleCollector();
       collector.RequestId = requestId;
       Outcome outcome = VerifyImplementation(impl, collector);
-      if (outcome == Outcome.Errors || outcome == Outcome.TimedOut || outcome == Outcome.OutOfMemory || outcome == Outcome.OutOfResource) {
+      if (outcome == Outcome.Errors || outcome == Outcome.TimedOut || outcome == Outcome.OutOfMemory) {
         errors = collector.examples;
       } else {
         errors = null;
@@ -765,7 +768,7 @@ namespace VC {
 
       TokenTextWriter debugWriter = null;
       if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
-        debugWriter = new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false);
+        debugWriter = new TokenTextWriter("<console>", Console.Out, false);
         debugWriter.WriteLine("Effective precondition:");
       }
 
@@ -787,18 +790,12 @@ namespace VC {
         Contract.Assert(req != null);
         Expr e = Substituter.Apply(formalProcImplSubst, req.Condition);
         Cmd c = new AssumeCmd(req.tok, e);
-        c.IrrelevantForChecksumComputation = true;
         insertionPoint.Cmds.Add(c);
         if (debugWriter != null) {
           c.Emit(debugWriter, 1);
         }
       }
       origStartBlock.Predecessors.Add(insertionPoint);
-
-      if (impl.ExplicitAssumptionAboutCachedPrecondition != null)
-      {
-        insertionPoint.Cmds.Add(impl.ExplicitAssumptionAboutCachedPrecondition);
-      }
 
       if (debugWriter != null) {
         debugWriter.WriteLine();
@@ -814,40 +811,69 @@ namespace VC {
     /// already been constructed for the implementation (and so
     /// is already an element of impl.Blocks)
     /// </param>
-    protected static void InjectPostConditions(Implementation impl, Block unifiedExitBlock, Dictionary<TransferCmd, ReturnCmd> gotoCmdOrigins) {
+    protected static Block InjectPostConditions(Implementation impl, Block unifiedExitBlock, Dictionary<TransferCmd, ReturnCmd> gotoCmdOrigins) {
       Contract.Requires(impl != null);
       Contract.Requires(unifiedExitBlock != null);
       Contract.Requires(gotoCmdOrigins != null);
       Contract.Requires(impl.Proc != null);
       Contract.Requires(unifiedExitBlock.TransferCmd is ReturnCmd);
+      Contract.Ensures(Contract.Result<Block>() != null);
+      Contract.Ensures(Contract.Result<Block>().TransferCmd is ReturnCmd);
 
       TokenTextWriter debugWriter = null;
       if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
-        debugWriter = new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false);
+        debugWriter = new TokenTextWriter("<console>", Console.Out, false);
         debugWriter.WriteLine("Effective postcondition:");
       }
 
       Substitution formalProcImplSubst = Substituter.SubstitutionFromHashtable(impl.GetImplFormalMap());
+      Block insertionPoint = unifiedExitBlock;
+      string LabelPrefix = "ReallyLastGeneratedExit";
+      int k = 0;
 
       // (free and checked) ensures clauses
       foreach (Ensures ens in impl.Proc.Ensures) {
+        cce.LoopInvariant(insertionPoint.TransferCmd is ReturnCmd);
+
         Contract.Assert(ens != null);
         if (!ens.Free) { // skip free ensures clauses
-            Expr e = Substituter.Apply(formalProcImplSubst, ens.Condition);
+          Expr e = Substituter.Apply(formalProcImplSubst, ens.Condition);
+          CodeExpr be = ens.Condition as CodeExpr;
+          if (be == null) {
+            // This is the normal case, where the postcondition is an ordinary expression
             Ensures ensCopy = (Ensures)cce.NonNull(ens.Clone());
             ensCopy.Condition = e;
             AssertEnsuresCmd c = new AssertEnsuresCmd(ensCopy);
             c.ErrorDataEnhanced = ensCopy.ErrorDataEnhanced;
-            unifiedExitBlock.Cmds.Add(c);
+            insertionPoint.Cmds.Add(c);
             if (debugWriter != null) {
               c.Emit(debugWriter, 1);
             }
+          } else {
+            // This is a CodeExpr, so append all of its blocks (changing return expressions
+            // to assert statements), insert a goto to its head block from the current insertion
+            // point, and create a new empty block as the current insertion point.
+            // Here goes:  First, create the new block, which will become the new insertion
+            // point and which will serve as a target for the CodeExpr.  Steal the TransferCmd
+            // from insertionPoint, since insertionPoint's TransferCmd will soon be replaced anyhow.
+            Block nextIP = new Block(new Token(-17, -4), LabelPrefix + k, new List<Cmd>(), insertionPoint.TransferCmd);
+            k++;
+            // Second, append the CodeExpr blocks to the implementation's blocks
+            ThreadInCodeExpr(impl, nextIP, be, true, debugWriter);
+            // Third, make the old insertion-point block goto the entry block of the CodeExpr
+            Block beEntry = cce.NonNull(be.Blocks[0]);
+            insertionPoint.TransferCmd = new GotoCmd(Token.NoToken, new List<String> { beEntry.Label }, new List<Block> { beEntry });
+            beEntry.Predecessors.Add(insertionPoint);
+            // Fourth, update the insertion point
+            insertionPoint = nextIP;
+          }
         }
       }
 
       if (debugWriter != null) {
         debugWriter.WriteLine();
       }
+      return insertionPoint;
     }
 
 
@@ -863,7 +889,7 @@ namespace VC {
 
       TokenTextWriter debugWriter = null;
       if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
-        debugWriter = new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false);
+        debugWriter = new TokenTextWriter("<console>", Console.Out, false);
         debugWriter.WriteLine("Effective precondition:");
       }
 
@@ -920,7 +946,7 @@ namespace VC {
           post.Add(c);
 
           if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
-            c.Emit(new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false), 1);
+            c.Emit(new TokenTextWriter("<console>", Console.Out, false), 1);
           }
         }
       }
@@ -944,7 +970,7 @@ namespace VC {
       Contract.Ensures(Contract.Result<List<Cmd>>() != null);
       TokenTextWriter debugWriter = null;
       if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
-        debugWriter = new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false);
+        debugWriter = new TokenTextWriter("<console>", Console.Out, false);
         debugWriter.WriteLine("Effective precondition from where-clauses:");
       }
 
@@ -1002,11 +1028,11 @@ namespace VC {
     #endregion
 
 
-    protected Checker FindCheckerFor(int timeout, int rlimit = 0, bool isBlocking = true, int waitTimeinMs = 50, int maxRetries = 3)
+    protected Checker FindCheckerFor(int timeout, bool isBlocking = true)
     {
-      Contract.Requires(0 <= waitTimeinMs && 0 <= maxRetries);
       Contract.Ensures(!isBlocking || Contract.Result<Checker>() != null);
 
+      var maxRetries = 3;
       lock (checkers)
       {
       retry:
@@ -1018,7 +1044,7 @@ namespace VC {
           {
             try
             {
-              if (c.WillingToHandle(timeout, rlimit, program))
+              if (c.WillingToHandle(timeout, program))
               {
                 c.GetReady();
                 return c;
@@ -1027,15 +1053,13 @@ namespace VC {
               {
                 if (c.IsIdle)
                 {
-                  c.Retarget(program, c.TheoremProver.Context, timeout, rlimit);
+                  c.Retarget(program, c.TheoremProver.Context, timeout);
                   c.GetReady();
                   return c;
                 }
                 else
                 {
                   checkers.RemoveAt(i);
-                  i--;
-                  continue;
                 }
               }
             }
@@ -1050,10 +1074,7 @@ namespace VC {
         {
           if (isBlocking || 0 < maxRetries)
           {
-            if (0 < waitTimeinMs)
-            {
-              Monitor.Wait(checkers, waitTimeinMs);
-            }
+            Monitor.Wait(checkers, 50);
             maxRetries--;
             goto retry;
           }
@@ -1069,7 +1090,7 @@ namespace VC {
         {
           log = log + "." + checkers.Count;
         }
-        Checker ch = new Checker(this, program, log, appendLogFile, timeout, rlimit);
+        Checker ch = new Checker(this, program, log, appendLogFile, timeout);
         ch.GetReady();
         checkers.Add(ch);
         return ch;
@@ -1096,10 +1117,6 @@ namespace VC {
         {
           ce.RequestId = RequestId;
         }
-        if (ce.OriginalRequestId == null && 1 < CommandLineOptions.Clo.VerifySnapshots)
-        {
-          ce.OriginalRequestId = RequestId;
-        }
         examples.Add(ce);
       }
 
@@ -1117,7 +1134,7 @@ namespace VC {
       CommandLineOptions.Clo.PrintUnstructured = 2;  // print only the unstructured program
       bool oldPrintDesugaringSetting = CommandLineOptions.Clo.PrintDesugarings;
       CommandLineOptions.Clo.PrintDesugarings = printDesugarings;
-      impl.Emit(new TokenTextWriter("<console>", Console.Out, /*setTokens=*/ false, /*pretty=*/ false), 0);
+      impl.Emit(new TokenTextWriter("<console>", Console.Out, false), 0);
       CommandLineOptions.Clo.PrintDesugarings = oldPrintDesugaringSetting;
       CommandLineOptions.Clo.PrintUnstructured = oldPrintUnstructured;
     }
@@ -1141,8 +1158,7 @@ namespace VC {
         }
         if (returnBlocks > 1) {
           string unifiedExitLabel = "GeneratedUnifiedExit";
-          Block unifiedExit;
-          unifiedExit = new Block(new Token(-17, -4), unifiedExitLabel, new List<Cmd>(), new ReturnCmd(impl.StructuredStmts != null ? impl.StructuredStmts.EndCurly : Token.NoToken));         
+          Block unifiedExit = new Block(new Token(-17, -4), unifiedExitLabel, new List<Cmd>(), new ReturnCmd(Token.NoToken));
           Contract.Assert(unifiedExit != null);
           foreach (Block b in impl.Blocks) {
             if (b.TransferCmd is ReturnCmd) {
@@ -1306,7 +1322,7 @@ namespace VC {
           IdentifierExpr v_prime_exp = new IdentifierExpr(v_prime.tok, v_prime);
           #endregion
           #region Create the assume command itself
-          AssumeCmd ac = new AssumeCmd(v.tok, TypedExprEq(v_prime_exp, pred_incarnation_exp, v_prime.Name.Contains("a##cached##")));
+          AssumeCmd ac = new AssumeCmd(v.tok, TypedExprEq(v_prime_exp, pred_incarnation_exp));
           pred.Cmds.Add(ac);
           #endregion
           #endregion
@@ -1320,7 +1336,7 @@ namespace VC {
 
     Dictionary<Variable, Expr> preHavocIncarnationMap = null;     // null = the previous command was not an HashCmd. Otherwise, a *copy* of the map before the havoc statement
 
-    protected void TurnIntoPassiveBlock(Block b, Dictionary<Variable, Expr> incarnationMap, ModelViewInfo mvInfo, Substitution oldFrameSubst, MutableVariableCollector variableCollector, byte[] currentChecksum = null) {
+    protected void TurnIntoPassiveBlock(Block b, Dictionary<Variable, Expr> incarnationMap, ModelViewInfo mvInfo, Substitution oldFrameSubst) {
       Contract.Requires(b != null);
       Contract.Requires(incarnationMap != null);
       Contract.Requires(mvInfo != null);
@@ -1330,12 +1346,8 @@ namespace VC {
       List<Cmd> passiveCmds = new List<Cmd>();
       foreach (Cmd c in b.Cmds) {
         Contract.Assert(c != null); // walk forward over the commands because the map gets modified in a forward direction
-        ChecksumHelper.ComputeChecksums(c, currentImplementation, variableCollector.UsedVariables, currentChecksum);
-        variableCollector.Visit(c);
-        currentChecksum = c.Checksum;
-        TurnIntoPassiveCmd(c, incarnationMap, oldFrameSubst, passiveCmds, mvInfo, b);
+        TurnIntoPassiveCmd(c, incarnationMap, oldFrameSubst, passiveCmds, mvInfo);
       }
-      b.Checksum = currentChecksum;
       b.Cmds = passiveCmds;
 
       if (b.TransferCmd is ReturnExprCmd) {
@@ -1351,34 +1363,7 @@ namespace VC {
       Contract.Requires(impl != null);
       Contract.Requires(mvInfo != null);
 
-      currentImplementation = impl;
-
-      var start = DateTime.UtcNow;
-
       Dictionary<Variable, Expr> r = ConvertBlocks2PassiveCmd(impl.Blocks, impl.Proc.Modifies, mvInfo);
-      
-      var end = DateTime.UtcNow;
-
-      if (CommandLineOptions.Clo.TraceCachingForDebugging)
-      {
-        Console.Out.WriteLine("Turned implementation into passive commands within {0:F0} ms.\n", end.Subtract(start).TotalMilliseconds);
-      }
-
-      if (CommandLineOptions.Clo.TraceCachingForDebugging)
-      {
-        using (var tokTxtWr = new TokenTextWriter("<console>", Console.Out, false, false))
-        {
-          var pd = CommandLineOptions.Clo.PrintDesugarings;
-          var pu = CommandLineOptions.Clo.PrintUnstructured;
-          CommandLineOptions.Clo.PrintDesugarings = true;
-          CommandLineOptions.Clo.PrintUnstructured = 1;
-          impl.Emit(tokTxtWr, 0);
-          CommandLineOptions.Clo.PrintDesugarings = pd;
-          CommandLineOptions.Clo.PrintUnstructured = pu;
-        }
-      }
-
-      currentImplementation = null;
 
       RestoreParamWhereClauses(impl);
 
@@ -1429,7 +1414,6 @@ namespace VC {
       Dictionary<Block, Dictionary<Variable, Expr>> block2Incarnation = new Dictionary<Block, Dictionary<Variable, Expr>>();
       Block exitBlock = null;
       Dictionary<Variable, Expr> exitIncarnationMap = null;
-      var variableCollectors = new Dictionary<Block, MutableVariableCollector>();
       foreach (Block b in sortedNodes) {
         Contract.Assert(b != null);
         Contract.Assert(!block2Incarnation.ContainsKey(b));
@@ -1440,17 +1424,8 @@ namespace VC {
 
         // Decrement the succCount field in each predecessor. Once the field reaches zero in any block, 
         // all its successors have been passified.  Consequently, its entry in block2Incarnation can be removed.
-        byte[] currentChecksum = null;
-        var mvc = new MutableVariableCollector();
-        variableCollectors[b] = mvc;
         foreach (Block p in b.Predecessors) {
           p.succCount--;
-          if (p.Checksum != null)
-          {
-            // Compute the checksum based on the checksums of the predecessor. The order should not matter.
-            currentChecksum = ChecksumHelper.CombineChecksums(p.Checksum, currentChecksum, true);
-          }
-          mvc.AddUsedVariables(variableCollectors[p].UsedVariables);
           if (p.succCount == 0)
             block2Incarnation.Remove(p);
         }
@@ -1467,12 +1442,10 @@ namespace VC {
         }
         #endregion Each block's map needs to be available to successor blocks
 
-        TurnIntoPassiveBlock(b, incarnationMap, mvInfo, oldFrameSubst, mvc, currentChecksum);
+        TurnIntoPassiveBlock(b, incarnationMap, mvInfo, oldFrameSubst);
         exitBlock = b;
         exitIncarnationMap = incarnationMap;
       }
-
-      variableCollectors.Clear();
 
       // Verify that exitBlock is indeed the unique exit block
       Contract.Assert(exitBlock != null);
@@ -1497,49 +1470,16 @@ namespace VC {
       return Substituter.SubstitutionFromHashtable(oldFrameMap);
     }
 
-    public enum CachingAction : byte
-    {
-      DoNothingToAssert,
-      MarkAsPartiallyVerified,
-      MarkAsFullyVerified,
-      RecycleError,
-      AssumeNegationOfAssumptionVariable,
-      DropAssume
-    }
-
-    public long[] CachingActionCounts;
-
-    void TraceCachingAction(Cmd cmd, CachingAction action)
-    {
-      if (CommandLineOptions.Clo.TraceCachingForTesting)
-      {
-        using (var tokTxtWr = new TokenTextWriter("<console>", Console.Out, false, false))
-        {
-          var loc = cmd.tok != null && cmd.tok != Token.NoToken ? string.Format("{0}({1},{2})", cmd.tok.filename, cmd.tok.line, cmd.tok.col) : "<unknown location>";
-          Console.Write("Processing command (at {0}) ", loc);
-          cmd.Emit(tokTxtWr, 0);
-          Console.Out.WriteLine("  >>> {0}", action);
-        }
-      }
-      
-      if (CommandLineOptions.Clo.TraceCachingForBenchmarking && CachingActionCounts != null)
-      {
-        Interlocked.Increment(ref CachingActionCounts[(int)action]);
-      }
-    }
-
     /// <summary>
     /// Turn a command into a passive command, and it remembers the previous step, to see if it is a havoc or not. In the case, it remembers the incarnation map BEFORE the havoc
     /// Meanwhile, record any information needed to later reconstruct a model view.
     /// </summary>
-    protected void TurnIntoPassiveCmd(Cmd c, Dictionary<Variable, Expr> incarnationMap, Substitution oldFrameSubst, List<Cmd> passiveCmds, ModelViewInfo mvInfo, Block containingBlock) {
+    protected void TurnIntoPassiveCmd(Cmd c, Dictionary<Variable, Expr> incarnationMap, Substitution oldFrameSubst, List<Cmd> passiveCmds, ModelViewInfo mvInfo) {
       Contract.Requires(c != null);
       Contract.Requires(incarnationMap != null);
       Contract.Requires(oldFrameSubst != null);
       Contract.Requires(passiveCmds != null);
       Contract.Requires(mvInfo != null);
-      Contract.Requires(containingBlock != null);
-
       Substitution incarnationSubst = Substituter.SubstitutionFromHashtable(incarnationMap);
       #region assert/assume P |--> assert/assume P[x := in(x)], out := in
       if (c is PredicateCmd) {
@@ -1547,26 +1487,6 @@ namespace VC {
 
         PredicateCmd pc = (PredicateCmd)c.Clone();
         Contract.Assert(pc != null);
-
-        QKeyValue current = pc.Attributes;
-        while (current != null)
-        {
-          if (current.Key == "minimize" || current.Key == "maximize") {
-            Contract.Assume(current.Params.Count == 1);
-            var param = current.Params[0] as Expr;
-            Contract.Assume(param != null && (param.Type.IsInt || param.Type.IsReal || param.Type.IsBv));
-            current.ClearParams();
-            current.AddParam(Substituter.ApplyReplacingOldExprs(incarnationSubst, oldFrameSubst, param));
-          }
-          if (current.Key == "verified_under") {
-            Contract.Assume(current.Params.Count == 1);
-            var param = current.Params[0] as Expr;
-            Contract.Assume(param != null && param.Type.IsBool);
-            current.ClearParams();
-            current.AddParam(Substituter.ApplyReplacingOldExprs(incarnationSubst, oldFrameSubst, param));
-          }
-          current = current.Next;
-        }
 
         Expr copy = Substituter.ApplyReplacingOldExprs(incarnationSubst, oldFrameSubst, pc.Expr);
         if (CommandLineOptions.Clo.ModelViewFile != null && pc is AssumeCmd) {
@@ -1578,107 +1498,13 @@ namespace VC {
           }
         }
         Contract.Assert(copy != null);
-        var dropCmd = false;
-        var relevantAssumpVars = currentImplementation != null ? currentImplementation.RelevantInjectedAssumptionVariables(incarnationMap) : new List<LocalVariable>();
-        var relevantDoomedAssumpVars = currentImplementation != null ? currentImplementation.RelevantDoomedInjectedAssumptionVariables(incarnationMap) : new List<LocalVariable>();
-        var checksum = pc.Checksum;
         if (pc is AssertCmd) {
-          var ac = (AssertCmd)pc;
-          ac.OrigExpr = ac.Expr;
-          Contract.Assert(ac.IncarnationMap == null);
-          ac.IncarnationMap = (Dictionary<Variable, Expr>)cce.NonNull(new Dictionary<Variable, Expr>(incarnationMap));
-
-          var subsumption = Wlp.Subsumption(ac);
-          if (relevantDoomedAssumpVars.Any())
-          {
-            TraceCachingAction(pc, CachingAction.DoNothingToAssert);
-          }
-          else if (currentImplementation != null
-                   && currentImplementation.HasCachedSnapshot
-                   && checksum != null
-                   && currentImplementation.IsAssertionChecksumInCachedSnapshot(checksum)
-                   && !currentImplementation.IsErrorChecksumInCachedSnapshot(checksum))
-          {
-            if (!currentImplementation.AnyErrorsInCachedSnapshot
-                && currentImplementation.InjectedAssumptionVariables.Count == 1
-                && relevantAssumpVars.Count == 1)
-            {
-              TraceCachingAction(pc, CachingAction.MarkAsPartiallyVerified);
-            }
-            else
-            {
-              bool isTrue;
-              var assmVars = currentImplementation.ConjunctionOfInjectedAssumptionVariables(incarnationMap, out isTrue);
-              TraceCachingAction(pc, !isTrue ? CachingAction.MarkAsPartiallyVerified : CachingAction.MarkAsFullyVerified);
-              var litExpr = ac.Expr as LiteralExpr;
-              if (litExpr == null || !litExpr.IsTrue)
-              {
-                ac.MarkAsVerifiedUnder(assmVars);
-              }
-              else
-              {
-                dropCmd = true;
-              }
-            }
-          }
-          else if (currentImplementation != null
-                   && currentImplementation.HasCachedSnapshot
-                   && relevantAssumpVars.Count == 0
-                   && checksum != null
-                   && currentImplementation.IsAssertionChecksumInCachedSnapshot(checksum)
-                   && currentImplementation.IsErrorChecksumInCachedSnapshot(checksum))
-          {
-            TraceCachingAction(pc, CachingAction.RecycleError);
-            ac.MarkAsVerifiedUnder(Expr.True);
-            currentImplementation.AddRecycledFailingAssertion(ac);
-            pc.Attributes = new QKeyValue(Token.NoToken, "recycled_failing_assertion", new List<object>(), pc.Attributes);
-          }
-          else
-          {
-            TraceCachingAction(pc, CachingAction.DoNothingToAssert);
-          }
-        }
-        else if (pc is AssumeCmd
-                 && QKeyValue.FindBoolAttribute(pc.Attributes, "precondition_previous_snapshot")
-                 && pc.SugaredCmdChecksum != null)
-        {
-          if (!relevantDoomedAssumpVars.Any()
-              && currentImplementation.HasCachedSnapshot
-              && currentImplementation.IsAssertionChecksumInCachedSnapshot(pc.SugaredCmdChecksum)
-              && !currentImplementation.IsErrorChecksumInCachedSnapshot(pc.SugaredCmdChecksum))
-          {
-            bool isTrue;
-            var assmVars = currentImplementation.ConjunctionOfInjectedAssumptionVariables(incarnationMap, out isTrue);
-            if (!isTrue)
-            {
-              copy = LiteralExpr.Imp(assmVars, copy);
-              TraceCachingAction(pc, CachingAction.MarkAsPartiallyVerified);
-            }
-            else
-            {
-              TraceCachingAction(pc, CachingAction.MarkAsFullyVerified);
-            }
-          }
-          else
-          {
-            TraceCachingAction(pc, CachingAction.DropAssume);
-            dropCmd = true;
-          }
-        }
-        else if (pc is AssumeCmd && QKeyValue.FindBoolAttribute(pc.Attributes, "assumption_variable_initialization"))
-        {
-          var identExpr = pc.Expr as IdentifierExpr;
-          if (identExpr != null && identExpr.Decl != null && !incarnationMap.ContainsKey(identExpr.Decl))
-          {
-            incarnationMap[identExpr.Decl] = LiteralExpr.True;
-            dropCmd = true;
-          }
+          ((AssertCmd)pc).OrigExpr = pc.Expr;
+          Contract.Assert(((AssertCmd)pc).IncarnationMap == null);
+          ((AssertCmd)pc).IncarnationMap = (Dictionary<Variable, Expr>)cce.NonNull(new Dictionary<Variable, Expr>(incarnationMap));
         }
         pc.Expr = copy;
-        if (!dropCmd)
-        {
-          passiveCmds.Add(pc);
-        }
+        passiveCmds.Add(pc);
       }
       #endregion
       #region x1 := E1, x2 := E2, ... |--> assume x1' = E1[in] & x2' = E2[in], out := in( x |-> x' ) [except as noted below]
@@ -1729,26 +1555,8 @@ namespace VC {
               newIncarnationMappings[lhs] = x_prime_exp;
             }
             #endregion
-
-            var nAryExpr = copies[i] as NAryExpr;
-            if (nAryExpr != null)
-            {
-              var binOp = nAryExpr.Fun as BinaryOperator;
-              if (binOp != null
-                  && binOp.Op == BinaryOperator.Opcode.And)
-              {
-                var arg0 = nAryExpr.Args[0] as LiteralExpr;
-                var arg1 = nAryExpr.Args[1] as LiteralExpr;
-                if ((arg0 != null && arg0.IsTrue) || (arg1 != null && arg1.IsFalse))
-                {
-                  // Replace the expressions "true && arg1" or "arg0 && false" by "arg1".
-                  copies[i] = nAryExpr.Args[1];
-                }
-              }
-            }
-          
             #region Create an assume command with the new variable
-            assumptions.Add(TypedExprEq(x_prime_exp, copies[i], x_prime_exp.Decl != null && x_prime_exp.Decl.Name.Contains("a##cached##")));
+            assumptions.Add(TypedExprEq(x_prime_exp, copies[i]));
             #endregion
           }
         }
@@ -1767,22 +1575,6 @@ namespace VC {
           }
           passiveCmds.Add(new AssumeCmd(c.tok, assumption));
         }
-
-        if (currentImplementation != null
-            && currentImplementation.HasCachedSnapshot
-            && !currentImplementation.AnyErrorsInCachedSnapshot
-            && currentImplementation.DoomedInjectedAssumptionVariables.Count == 0
-            && currentImplementation.InjectedAssumptionVariables.Count == 1
-            && assign.Lhss.Count == 1)
-        {
-          var identExpr = assign.Lhss[0].AsExpr as IdentifierExpr;
-          Expr incarnation;
-          if (identExpr != null && identExpr.Decl != null && QKeyValue.FindBoolAttribute(identExpr.Decl.Attributes, "assumption") && incarnationMap.TryGetValue(identExpr.Decl, out incarnation))
-          {
-            TraceCachingAction(assign, CachingAction.AssumeNegationOfAssumptionVariable);
-            passiveCmds.Add(new AssumeCmd(c.tok, Expr.Not(incarnation)));
-          }
-        }
       }
       #endregion
       #region havoc w |--> assume whereClauses, out := in( w |-> w' )
@@ -1792,11 +1584,7 @@ namespace VC {
 
         HavocCmd hc = (HavocCmd)c;
         Contract.Assert(c != null);
-        // If an assumption variable for postconditions is included here, it must have been assigned within a loop.
-        // We do not need to havoc it if we have performed a modular proof of the loop (i.e., using only the loop
-        // invariant) in the previous snapshot and, consequently, the corresponding assumption did not affect the
-        // anything after the loop. We can achieve this by simply not updating/adding it in the incarnation map.
-        List<IdentifierExpr> havocVars = hc.Vars.Where(v => !(QKeyValue.FindBoolAttribute(v.Decl.Attributes, "assumption") && v.Decl.Name.StartsWith("a##cached##"))).ToList();
+        List<IdentifierExpr> havocVars = hc.Vars;
         // First, compute the new incarnations
         foreach (IdentifierExpr ie in havocVars) {
           Contract.Assert(ie != null);
@@ -1819,18 +1607,6 @@ namespace VC {
             }
           }
         }
-
-        // Add the following assume-statement for each assumption variable 'v', where 'v_post' is the new incarnation and 'v_pre' is the old one:
-        // assume v_post ==> v_pre;
-        foreach (IdentifierExpr ie in havocVars)
-        {
-          if (QKeyValue.FindBoolAttribute(ie.Decl.Attributes, "assumption"))
-          {
-            var preInc = (Expr)(preHavocIncarnationMap[ie.Decl].Clone());
-            var postInc = (Expr)(incarnationMap[ie.Decl].Clone());
-            passiveCmds.Add(new AssumeCmd(c.tok, Expr.Imp(postInc, preInc)));
-          }
-        }
       }
       #endregion
  else if (c is CommentCmd) {
@@ -1840,7 +1616,7 @@ namespace VC {
         Contract.Assert(sug != null);
         Cmd cmd = sug.Desugaring;
         Contract.Assert(cmd != null);
-        TurnIntoPassiveCmd(cmd, incarnationMap, oldFrameSubst, passiveCmds, mvInfo, containingBlock);
+        TurnIntoPassiveCmd(cmd, incarnationMap, oldFrameSubst, passiveCmds, mvInfo);
       } else if (c is StateCmd) {
         this.preHavocIncarnationMap = null;       // we do not need to remeber the previous incarnations
         StateCmd st = (StateCmd)c;
@@ -1856,7 +1632,7 @@ namespace VC {
         // do the sub-commands
         foreach (Cmd s in st.Cmds) {
           Contract.Assert(s != null);
-          TurnIntoPassiveCmd(s, incarnationMap, oldFrameSubst, passiveCmds, mvInfo, containingBlock);
+          TurnIntoPassiveCmd(s, incarnationMap, oldFrameSubst, passiveCmds, mvInfo);
         }
         // remove the local variables from the incarnation map
         foreach (Variable v in st.Locals) {
@@ -1879,15 +1655,10 @@ namespace VC {
       #endregion
     }
 
-    NAryExpr TypedExprEq(Expr e0, Expr e1, bool doNotResolveOverloading = false) {
+    NAryExpr TypedExprEq(Expr e0, Expr e1) {
       Contract.Requires(e0 != null);
       Contract.Requires(e1 != null);
       NAryExpr e = Expr.Eq(e0, e1);
-      var fun = e.Fun as IOverloadedAppliable;
-      if (fun != null)
-      {
-        fun.DoNotResolveOverloading = doNotResolveOverloading;
-      }
       e.Type = Bpl.Type.Bool;
       e.TypeParameters = SimpleTypeParamInstantiation.EMPTY;
       return e;
@@ -2005,7 +1776,7 @@ namespace VC {
       // global variables
       lock (program.TopLevelDeclarations)
       {
-        foreach (var v in program.Variables)
+        foreach (Variable v in program.TopLevelDeclarations.OfType<Variable>())
         {
           if (!(v is Constant))
           {

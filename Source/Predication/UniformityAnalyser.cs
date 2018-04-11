@@ -84,7 +84,7 @@ namespace Microsoft.Boogie
 
         public void Analyse()
         {
-            var impls = prog.Implementations;
+            var impls = prog.TopLevelDeclarations.OfType<Implementation>();
 
             foreach (var Impl in impls)
             {
@@ -143,7 +143,7 @@ namespace Microsoft.Boogie
                 ProcedureChanged = true;
             }
 
-            var procs = prog.Procedures;
+            var procs = prog.TopLevelDeclarations.OfType<Procedure>();
 
             foreach (var Proc in procs) {
 
@@ -204,10 +204,6 @@ namespace Microsoft.Boogie
                     {
                         newIns.Add(s);
                     }
-                    foreach (string s in outParameters[Proc.Name])
-                    {
-                        newIns.Add("_V" + s);
-                    }
                     inParameters[Proc.Name] = newIns;
                 }
             }
@@ -240,7 +236,7 @@ namespace Microsoft.Boogie
                 foreach (Block b in Impl.Blocks) {
                   Analyse(Impl, b.Cmds, false);
                 }
-
+                        
                 return;
             }
 
@@ -272,11 +268,11 @@ namespace Microsoft.Boogie
 
         private Procedure GetProcedure(string procedureName)
         {
-            foreach (var p in prog.Procedures)
+            foreach (Declaration D in prog.TopLevelDeclarations)
             {
-                if (p.Name == procedureName)
+                if (D is Procedure && ((D as Procedure).Name == procedureName))
                 {
-                    return p;
+                    return D as Procedure;
                 }
             }
             Debug.Assert(false);
@@ -400,7 +396,7 @@ namespace Microsoft.Boogie
             return !nonUniformBlocks[procedureName].Contains(b);
         }
 
-        class UniformExpressionAnalysisVisitor : ReadOnlyVisitor {
+        class UniformExpressionAnalysisVisitor : StandardVisitor {
 
           private bool isUniform = true;
           private Dictionary<string, bool> uniformityInfo;
@@ -426,11 +422,6 @@ namespace Microsoft.Boogie
 
         public bool IsUniform(string procedureName, Expr expr)
         {
-            if (!uniformityInfo.ContainsKey(procedureName))
-            {
-                return false;
-            }
-
             UniformExpressionAnalysisVisitor visitor = new UniformExpressionAnalysisVisitor(uniformityInfo[procedureName].Value);
             visitor.VisitExpr(expr);
             return visitor.IsUniform();

@@ -38,27 +38,15 @@ namespace Microsoft.Boogie.AbstractInterpretation {
   }
 
   public class ProcedureSummaryEntry {
-
-    private HashSet<CallSite>/*!*/ _returnPoints; // whenever OnExit changes, we start analysis again at all the ReturnPoints
-
-    public HashSet<CallSite>/*!*/ ReturnPoints {
-      get {
-        Contract.Ensures(Contract.Result<HashSet<CallSite>>() != null);
-        return this._returnPoints;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._returnPoints = value;
-      }
-    }
-
+    public HashSet<CallSite>/*!*/ ReturnPoints; // whenever OnExit changes, we start analysis again at all the ReturnPoints
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._returnPoints != null);
+      Contract.Invariant(ReturnPoints != null);
     }
 
+
     public ProcedureSummaryEntry() {
-      this._returnPoints = new HashSet<CallSite>();
+      this.ReturnPoints = new HashSet<CallSite>();
     }
 
   } // class
@@ -88,7 +76,6 @@ namespace Microsoft.Boogie {
   using System.Collections;
   using System.Diagnostics;
   using System.Collections.Generic;
-  using System.Collections.ObjectModel;
   using System.Diagnostics.Contracts;
   using Microsoft.Boogie.AbstractInterpretation;
   using Microsoft.Boogie.GraphUtil;
@@ -96,23 +83,13 @@ namespace Microsoft.Boogie {
 
   [ContractClass(typeof(AbsyContracts))]
   public abstract class Absy {
-    private IToken/*!*/ _tok;
+    public IToken/*!*/ tok;
     private int uniqueId;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._tok != null);
+      Contract.Invariant(tok != null);
     }
 
-    public IToken tok { //Rename this property and "_tok" if possible
-      get {
-        Contract.Ensures(Contract.Result<IToken>() != null);
-        return this._tok;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._tok = value;
-      }
-    }
 
     public int Line {
       get {
@@ -127,11 +104,11 @@ namespace Microsoft.Boogie {
 
     public Absy(IToken tok) {
       Contract.Requires(tok != null);
-      this._tok = tok;
-      this.uniqueId = System.Threading.Interlocked.Increment(ref CurrentAbsyNodeId);
+      this.tok = tok;
+      this.uniqueId = AbsyNodeCount++;
     }
 
-    private static int CurrentAbsyNodeId = -1;
+    private static int AbsyNodeCount = 0;
 
     // We uniquely number every AST node to make them
     // suitable for our implementation of functional maps.
@@ -162,13 +139,7 @@ namespace Microsoft.Boogie {
     public virtual Absy Clone() {
       Contract.Ensures(Contract.Result<Absy>() != null);
       Absy/*!*/ result = cce.NonNull((Absy/*!*/)this.MemberwiseClone());
-      result.uniqueId = System.Threading.Interlocked.Increment(ref CurrentAbsyNodeId); // BUGBUG??
-
-      if (InternalNumberedMetadata != null) {
-        // This should probably use the lock
-        result.InternalNumberedMetadata = new List<Object>(this.InternalNumberedMetadata);
-      }
-
+      result.uniqueId = AbsyNodeCount++; // BUGBUG??
       return result;
     }
 
@@ -178,125 +149,6 @@ namespace Microsoft.Boogie {
       System.Diagnostics.Debug.Fail("Unknown Absy node type: " + this.GetType());
       throw new System.NotImplementedException();
     }
-
-    #region numberedmetadata
-    // Implementation of Numbered Metadata
-    // This allows any number of arbitrary objects to be
-    // associated with an instance of an Absy at run time
-    // in a type safe manner using an integer as a key.
-
-    // We could use a dictionary but we use a List for look up speed
-    // For this to work well the user needs to use small integers as
-    // keys. The list is created lazily to minimise memory overhead.
-    private volatile List<Object> InternalNumberedMetadata = null;
-
-    // The lock exists to ensure that InternalNumberedMetadata is a singleton
-    // for every instance of this class.
-    // It is static to minimise the memory overhead (we don't want a lock per instance).
-    private static readonly Object NumberedMetadataLock = new object();
-
-    /// <summary>
-    /// Gets the number of meta data objects associated with this instance
-    /// </summary>
-    /// <value>The numbered meta data count.</value>
-    public int NumberedMetaDataCount
-    {
-      get { return InternalNumberedMetadata == null? 0: InternalNumberedMetadata.Count; }
-    }
-
-    /// <summary>
-    /// Gets an IEnumerable over the numbered metadata associated
-    /// with this instance.
-    /// </summary>
-    /// <value>
-    /// The numbered meta data enumerable that looks like the Enumerable
-    /// of a dictionary.
-    /// </value>
-    public IEnumerable<KeyValuePair<int, Object>> NumberedMetadata
-    {
-      get {
-        if (InternalNumberedMetadata == null)
-          return Enumerable.Empty<KeyValuePair<int,Object>>();
-        else
-          return InternalNumberedMetadata.Select((v, index) => new KeyValuePair<int, Object>(index, v));
-      }
-    }
-
-    /// <summary>
-    /// Gets the metatdata at specified index.
-    /// ArgumentOutOfRange exception is raised if it is not available.
-    /// InvalidCastExcpetion is raised if the metadata is available but the wrong type was requested.
-    /// </summary>
-    /// <returns>The stored metadata of type T</returns>
-    /// <param name="index">The index of the metadata</param>
-    /// <typeparam name="T">The type of the metadata object required</typeparam>
-    public T GetMetadata<T>(int index) {
-      // We aren't using NumberedMetadataLock for speed. Perhaps we should be using it?
-      if (InternalNumberedMetadata == null)
-        throw new ArgumentOutOfRangeException();
-
-      if (InternalNumberedMetadata[index] is T)
-        return (T) InternalNumberedMetadata[index];
-      else if (InternalNumberedMetadata[index] == null) {
-        throw new InvalidCastException("Numbered metadata " + index +
-                                       " is null which cannot be casted to " + typeof(T));
-      }
-      else {
-        throw new InvalidCastException("Numbered metadata " + index +
-                                       " is of type " + InternalNumberedMetadata[index].GetType() +
-                                       " rather than requested type " + typeof(T));
-      }
-    }
-
-    private void InitialiseNumberedMetadata() {
-      // Ensure InternalNumberedMetadata is a singleton
-      if (InternalNumberedMetadata == null) {
-        lock (NumberedMetadataLock) {
-          if (InternalNumberedMetadata == null)
-            InternalNumberedMetadata = new List<Object>();
-        }
-      }
-    }
-
-    /// <summary>
-    /// Sets the metadata for this instace at a specified index.
-    /// </summary>
-    /// <param name="index">The index of the metadata</param>
-    /// <param name="value">The value to set</param>
-    /// <typeparam name="T">The type of value</typeparam>
-    public void SetMetadata<T>(int index, T value) {
-      InitialiseNumberedMetadata();
-
-      if (index < 0)
-        throw new IndexOutOfRangeException();
-
-      lock (NumberedMetadataLock) {
-        if (index < InternalNumberedMetadata.Count)
-          InternalNumberedMetadata[index] = value;
-        else {
-          // Make sure expansion only happens once whilst we pad
-          if (InternalNumberedMetadata.Capacity <= index) {
-            // Use the next available power of 2
-            InternalNumberedMetadata.Capacity = (int) Math.Pow(2, Math.Ceiling(Math.Log(index+1,2)));
-          }
-
-          // Pad with nulls
-          while (InternalNumberedMetadata.Count < index)
-            InternalNumberedMetadata.Add (null);
-
-          InternalNumberedMetadata.Add(value);
-          Debug.Assert(InternalNumberedMetadata.Count == (index + 1));
-        }
-      }
-    }
-
-    #endregion
-
-  }
-  
-  public interface ICarriesAttributes
-  {
-    QKeyValue Attributes { get; set; }
   }
 
   [ContractClassFor(typeof(Absy))]
@@ -314,39 +166,33 @@ namespace Microsoft.Boogie {
     }
   }
 
-  public interface IPotentialErrorNode<out TGet>
-  {
-    TGet ErrorData
-    {
+  // TODO: Ideally, this would use generics.
+  public interface IPotentialErrorNode {
+    object ErrorData {
       get;
-    }
-  }
-
-  public interface IPotentialErrorNode<out TGet, in TSet> : IPotentialErrorNode<TGet>
-  {
-    new TSet ErrorData
-    {
       set;
     }
   }
 
   public class Program : Absy {
-
+    [Rep]
+    public List<Declaration/*!*/>/*!*/ TopLevelDeclarations;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(cce.NonNullElements(this.topLevelDeclarations));
-      Contract.Invariant(cce.NonNullElements(this.globalVariablesCache, true));
+      Contract.Invariant(cce.NonNullElements(TopLevelDeclarations));
+      Contract.Invariant(globals == null || cce.NonNullElements(globals));
     }
-    
+
+
     public Program()
       : base(Token.NoToken) {
-      this.topLevelDeclarations = new List<Declaration>();
+      this.TopLevelDeclarations = new List<Declaration>();
     }
 
     public void Emit(TokenTextWriter stream) {
       Contract.Requires(stream != null);
       stream.SetToken(this);
-      this.topLevelDeclarations.Emit(stream);
+      this.TopLevelDeclarations.Emit(stream);
     }
 
     public void ProcessDatatypeConstructors() {
@@ -363,18 +209,17 @@ namespace Microsoft.Boogie {
         constructors.Add(func.Name, constructor);
         prunedTopLevelDeclarations.Add(constructor);
       }
-      ClearTopLevelDeclarations();
-      AddTopLevelDeclarations(prunedTopLevelDeclarations);
+      TopLevelDeclarations = prunedTopLevelDeclarations;
     
       foreach (DatatypeConstructor f in constructors.Values) {
         for (int i = 0; i < f.InParams.Count; i++) {
           DatatypeSelector selector = new DatatypeSelector(f, i);
           f.selectors.Add(selector);
-          AddTopLevelDeclaration(selector);
+          TopLevelDeclarations.Add(selector);
         }
         DatatypeMembership membership = new DatatypeMembership(f);
         f.membership = membership;
-        AddTopLevelDeclaration(membership);
+        TopLevelDeclarations.Add(membership);
       }
     }
 
@@ -396,19 +241,20 @@ namespace Microsoft.Boogie {
       //Contract.Requires(rc != null);
       Helpers.ExtraTraceInformation("Starting resolution");
 
-      foreach (var d in TopLevelDeclarations) {
+      foreach (Declaration d in TopLevelDeclarations) {
         d.Register(rc);
       }
 
       ResolveTypes(rc);
 
       var prunedTopLevelDecls = new List<Declaration/*!*/>();
-      foreach (var d in TopLevelDeclarations) {
+      foreach (Declaration d in TopLevelDeclarations) {
         if (QKeyValue.FindBoolAttribute(d.Attributes, "ignore")) {
           continue;
         }
         // resolve all the non-type-declarations
-        if (!(d is TypeCtorDecl || d is TypeSynonymDecl)) {
+        if (d is TypeCtorDecl || d is TypeSynonymDecl) {
+        } else {
           int e = rc.ErrorCount;
           d.Resolve(rc);
           if (CommandLineOptions.Clo.OverlookBoogieTypeErrors && rc.ErrorCount != e && d is Implementation) {
@@ -420,27 +266,29 @@ namespace Microsoft.Boogie {
         }
         prunedTopLevelDecls.Add(d);
       }
-      ClearTopLevelDeclarations();
-      AddTopLevelDeclarations(prunedTopLevelDecls);
+      TopLevelDeclarations = prunedTopLevelDecls;
 
-      foreach (var v in Variables) {
-        v.ResolveWhere(rc);
+      foreach (Declaration d in TopLevelDeclarations) {
+        Variable v = d as Variable;
+        if (v != null) {
+          v.ResolveWhere(rc);
+        }
       }
     }
 
     private void ResolveTypes(ResolutionContext rc) {
       Contract.Requires(rc != null);
       // first resolve type constructors
-      foreach (var d in TopLevelDeclarations.OfType<TypeCtorDecl>()) {
-        if (!QKeyValue.FindBoolAttribute(d.Attributes, "ignore"))
+      foreach (Declaration d in TopLevelDeclarations) {
+        if (d is TypeCtorDecl && !QKeyValue.FindBoolAttribute(d.Attributes, "ignore"))
           d.Resolve(rc);
       }
 
       // collect type synonym declarations
       List<TypeSynonymDecl/*!*/>/*!*/ synonymDecls = new List<TypeSynonymDecl/*!*/>();
-      foreach (var d in TopLevelDeclarations.OfType<TypeSynonymDecl>()) {
+      foreach (Declaration d in TopLevelDeclarations) {
         Contract.Assert(d != null);
-        if (!QKeyValue.FindBoolAttribute(d.Attributes, "ignore"))
+        if (d is TypeSynonymDecl && !QKeyValue.FindBoolAttribute(d.Attributes, "ignore"))
           synonymDecls.Add((TypeSynonymDecl)d);
       }
 
@@ -464,252 +312,21 @@ namespace Microsoft.Boogie {
       Helpers.ExtraTraceInformation("Starting typechecking");
 
       int oldErrorCount = tc.ErrorCount;
-      foreach (var d in TopLevelDeclarations) {
+      foreach (Declaration d in TopLevelDeclarations) {
         d.Typecheck(tc);
       }
 
       if (oldErrorCount == tc.ErrorCount) {
         // check whether any type proxies have remained uninstantiated
         TypeAmbiguitySeeker/*!*/ seeker = new TypeAmbiguitySeeker(tc);
-        foreach (var d in TopLevelDeclarations) {
+        foreach (Declaration d in TopLevelDeclarations) {
           seeker.Visit(d);
         }
       }
     }
 
-    public override Absy Clone()
-    {
-        var cloned = (Program)base.Clone();
-        cloned.topLevelDeclarations = new List<Declaration>();
-        cloned.AddTopLevelDeclarations(topLevelDeclarations);
-        return cloned;
-    }
-
-    [Rep]
-    private List<Declaration/*!*/>/*!*/ topLevelDeclarations;
-
-    public IEnumerable<Declaration> TopLevelDeclarations
-    {
-        get
-        {
-            Contract.Ensures(cce.NonNullElements(Contract.Result<IEnumerable<Declaration>>()));
-            return topLevelDeclarations.AsReadOnly();
-        }
-
-        set
-        {
-            Contract.Requires(value != null);
-            // materialize the decls, in case there is any dependency 
-            // back on topLevelDeclarations
-            var v = value.ToList();
-            // remove null elements
-            v.RemoveAll(d => (d == null));
-            // now clear the decls
-            ClearTopLevelDeclarations();
-            // and add the values
-            AddTopLevelDeclarations(v);
-        }
-    }
-
-    public void AddTopLevelDeclaration(Declaration decl)
-    {
-      Contract.Requires(!TopLevelDeclarationsAreFrozen);
-      Contract.Requires(decl != null);
-
-      topLevelDeclarations.Add(decl);
-      this.globalVariablesCache = null;
-    }
-
-    public void AddTopLevelDeclarations(IEnumerable<Declaration> decls)
-    {
-      Contract.Requires(!TopLevelDeclarationsAreFrozen);
-      Contract.Requires(cce.NonNullElements(decls));
-
-      topLevelDeclarations.AddRange(decls);
-      this.globalVariablesCache = null;
-    }
-
-    public void RemoveTopLevelDeclaration(Declaration decl)
-    {
-        Contract.Requires(!TopLevelDeclarationsAreFrozen);
-
-        topLevelDeclarations.Remove(decl);
-        this.globalVariablesCache = null;
-    }
-
-    public void RemoveTopLevelDeclarations(Predicate<Declaration> match)
-    {
-      Contract.Requires(!TopLevelDeclarationsAreFrozen);
-
-      topLevelDeclarations.RemoveAll(match);
-      this.globalVariablesCache = null;
-    }
-
-    public void ClearTopLevelDeclarations()
-    {
-      Contract.Requires(!TopLevelDeclarationsAreFrozen);
-
-      topLevelDeclarations.Clear();
-      this.globalVariablesCache = null;
-    }
-
-    bool topLevelDeclarationsAreFrozen;
-    public bool TopLevelDeclarationsAreFrozen { get { return topLevelDeclarationsAreFrozen; } }
-    public void FreezeTopLevelDeclarations()
-    {
-      topLevelDeclarationsAreFrozen = true;
-    }
-
-    Dictionary<string, Implementation> implementationsCache;
-    public IEnumerable<Implementation> Implementations
-    {
-      get
-      {
-        if (implementationsCache != null)
-        {
-          return implementationsCache.Values;
-        }
-        var result = TopLevelDeclarations.OfType<Implementation>();
-        if (topLevelDeclarationsAreFrozen)
-        {
-          implementationsCache = result.ToDictionary(p => p.Id);
-        }
-        return result;
-      }
-    }
-
-    public Implementation FindImplementation(string id)
-    {
-      Implementation result = null;
-      if (implementationsCache != null && implementationsCache.TryGetValue(id, out result))
-      {
-        return result;
-      }
-      else
-      {
-        return Implementations.FirstOrDefault(i => i.Id == id);
-      }
-    }
-
-    List<Axiom> axiomsCache;
-    public IEnumerable<Axiom> Axioms
-    {
-      get
-      {
-        if (axiomsCache != null)
-        {
-          return axiomsCache;
-        }
-        var result = TopLevelDeclarations.OfType<Axiom>();
-        if (topLevelDeclarationsAreFrozen)
-        {
-          axiomsCache = result.ToList();
-        }
-        return result;
-      }
-    }
-
-    Dictionary<string, Procedure> proceduresCache;
-    public IEnumerable<Procedure> Procedures
-    {
-      get
-      {
-        if (proceduresCache != null)
-        {
-          return proceduresCache.Values;
-        }
-        var result = TopLevelDeclarations.OfType<Procedure>();
-        if (topLevelDeclarationsAreFrozen)
-        {
-          proceduresCache = result.ToDictionary(p => p.Name);
-        }
-        return result;
-      }
-    }
-
-    public Procedure FindProcedure(string name)
-    {
-      Procedure result = null;
-      if (proceduresCache != null && proceduresCache.TryGetValue(name, out result))
-      {
-        return result;
-      }
-      else
-      {
-        return Procedures.FirstOrDefault(p => p.Name == name);
-      }
-    }
-
-    Dictionary<string, Function> functionsCache;
-    public IEnumerable<Function> Functions
-    {
-      get
-      {
-        if (functionsCache != null)
-        {
-          return functionsCache.Values;
-        }
-        var result = TopLevelDeclarations.OfType<Function>();
-        if (topLevelDeclarationsAreFrozen)
-        {
-          functionsCache = result.ToDictionary(f => f.Name);
-        }
-        return result;
-      }
-    }
-
-    public Function FindFunction(string name)
-    {
-      Function result = null;
-      if (functionsCache != null && functionsCache.TryGetValue(name, out result))
-      {
-        return result;
-      }
-      else
-      {
-        return Functions.FirstOrDefault(f => f.Name == name);
-      }
-    }
-    
-    public IEnumerable<Variable> Variables
-    {
-      get
-      {
-        return TopLevelDeclarations.OfType<Variable>();
-      }
-    }
-
-    public IEnumerable<Constant> Constants
-    {
-      get
-      {
-        return TopLevelDeclarations.OfType<Constant>();
-      }
-    }
-
-    private IEnumerable<GlobalVariable/*!*/> globalVariablesCache = null;
-    public List<GlobalVariable/*!*/>/*!*/ GlobalVariables
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<List<GlobalVariable>>()));
-
-        if (globalVariablesCache == null)
-          globalVariablesCache = TopLevelDeclarations.OfType<GlobalVariable>();
-
-        return new List<GlobalVariable>(globalVariablesCache);
-      }
-    }
-
-    public readonly ISet<string> NecessaryAssumes = new HashSet<string>();
-
-    public IEnumerable<Block> Blocks()
-    {
-      return Implementations.Select(Item => Item.Blocks).SelectMany(Item => Item);
-    }
-
     public void ComputeStronglyConnectedComponents() {
-      foreach (var d in this.TopLevelDeclarations) {
+      foreach (Declaration d in this.TopLevelDeclarations) {
         d.ComputeStronglyConnectedComponents();
       }
     }
@@ -718,66 +335,27 @@ namespace Microsoft.Boogie {
     /// Reset the abstract stated computed before
     /// </summary>
     public void ResetAbstractInterpretationState() {
-      foreach (var d in this.TopLevelDeclarations) {
+      foreach (Declaration d in this.TopLevelDeclarations) {
         d.ResetAbstractInterpretationState();
       }
     }
 
     public void UnrollLoops(int n, bool uc) {
       Contract.Requires(0 <= n);
-      foreach (var impl in Implementations) {
-        if (impl.Blocks != null && impl.Blocks.Count > 0) {
+      foreach (Declaration d in this.TopLevelDeclarations) {
+        Implementation impl = d as Implementation;
+        if (impl != null && impl.Blocks != null && impl.Blocks.Count > 0) {
           cce.BeginExpose(impl);
           {
             Block start = impl.Blocks[0];
             Contract.Assume(start != null);
             Contract.Assume(cce.IsConsistent(start));
             impl.Blocks = LoopUnroll.UnrollLoops(start, n, uc);
-            impl.FreshenCaptureStates();
           }
           cce.EndExpose();
         }
       }
     }
-
-
-    /// <summary>
-    /// Finds blocks that break out of a loop in NaturalLoops(header, backEdgeNode)
-    /// </summary>
-    /// <param name="header"></param>
-    /// <param name="backEdgeNode"></param>
-    /// <returns></returns>
-    private HashSet<Block> GetBreakBlocksOfLoop(Block header, Block backEdgeNode, Graph<Block/*!*/>/*!*/ g)
-    {
-        Contract.Assert(CommandLineOptions.Clo.DeterministicExtractLoops, "Can only be called with /deterministicExtractLoops option");
-        var immSuccBlks = new HashSet<Block>();
-        var loopBlocks = g.NaturalLoops(header, backEdgeNode);
-        foreach (Block/*!*/ block in loopBlocks)
-        {
-            Contract.Assert(block != null);
-            var auxCmd = block.TransferCmd as GotoCmd;
-            if (auxCmd == null) continue;
-            foreach (var bl in auxCmd.labelTargets)
-            {
-                if (loopBlocks.Contains(bl)) continue;
-                immSuccBlks.Add(bl);
-            }
-        }
-        return immSuccBlks;
-    }
-
-    private HashSet<Block> GetBlocksInAllNaturalLoops(Block header, Graph<Block/*!*/>/*!*/ g)
-    {
-        Contract.Assert(CommandLineOptions.Clo.DeterministicExtractLoops, "Can only be called with /deterministicExtractLoops option");
-        var allBlocksInNaturalLoops = new HashSet<Block>();
-        foreach (Block/*!*/ source in g.BackEdgeNodes(header))
-        {
-            Contract.Assert(source != null);
-            g.NaturalLoops(header, source).Iter(b => allBlocksInNaturalLoops.Add(b));
-        }
-        return allBlocksInNaturalLoops;
-    }
-
 
     void CreateProceduresForLoops(Implementation impl, Graph<Block/*!*/>/*!*/ g,
                                   List<Implementation/*!*/>/*!*/ loopImpls,
@@ -834,13 +412,7 @@ namespace Microsoft.Boogie {
         foreach (Block/*!*/ b in g.BackEdgeNodes(header))
         {
             Contract.Assert(b != null);
-            HashSet<Block> immSuccBlks = new HashSet<Block>();
-            if (detLoopExtract)
-            {
-                //Need to get the blocks that exit the loop, as we need to add them to targets and footprint
-                immSuccBlks = GetBreakBlocksOfLoop(header, b, g);
-            }
-            foreach (Block/*!*/ block in g.NaturalLoops(header, b).Union(immSuccBlks))
+            foreach (Block/*!*/ block in g.NaturalLoops(header, b))
             {
                 Contract.Assert(block != null);
                 foreach (Cmd/*!*/ cmd in block.Cmds)
@@ -995,16 +567,18 @@ namespace Microsoft.Boogie {
                 GotoCmd auxGotoCmd = block.TransferCmd as GotoCmd;
                 Contract.Assert(auxGotoCmd != null && auxGotoCmd.labelNames != null && 
                     auxGotoCmd.labelTargets != null && auxGotoCmd.labelTargets.Count >= 1);
-                //BUGFIX on 10/26/15: this contains nodes present in NaturalLoops for a different backedgenode
-                var loopNodes = GetBlocksInAllNaturalLoops(header, g); //var loopNodes = g.NaturalLoops(header, source); 
                 foreach(var bl in auxGotoCmd.labelTargets) {
-                    if (g.Nodes.Contains(bl) && //newly created blocks are not present in NaturalLoop(header, xx, g)
-                        !loopNodes.Contains(bl)) {
+                    bool found = false;
+                    foreach(var n in g.NaturalLoops(header, source)) { //very expensive, can we do a contains?
+                        if (bl == n) { //clarify: is this the right comparison?
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
                         Block auxNewBlock = new Block();
                         auxNewBlock.Label = ((Block)bl).Label;
-                        //these blocks may have read/write locals that are not present in naturalLoops
-                        //we need to capture these variables 
-                        auxNewBlock.Cmds = codeCopier.CopyCmdSeq(((Block)bl).Cmds); 
+                        auxNewBlock.Cmds = codeCopier.CopyCmdSeq(((Block)bl).Cmds);
                         //add restoration code for such blocks
                         if (loopHeaderToAssignCmd.ContainsKey(header))
                         {
@@ -1170,16 +744,20 @@ namespace Microsoft.Boogie {
     public static Graph<Implementation> BuildCallGraph(Program program) {
       Graph<Implementation> callGraph = new Graph<Implementation>();
       Dictionary<Procedure, HashSet<Implementation>> procToImpls = new Dictionary<Procedure, HashSet<Implementation>>();
-      foreach (var proc in program.Procedures) {
+      foreach (Declaration decl in program.TopLevelDeclarations) {
+        Procedure proc = decl as Procedure;
+        if (proc == null) continue;
         procToImpls[proc] = new HashSet<Implementation>();
       }
-      foreach (var impl in program.Implementations) {
-        if (impl.SkipVerification) continue;
+      foreach (Declaration decl in program.TopLevelDeclarations) {
+        Implementation impl = decl as Implementation;
+        if (impl == null || impl.SkipVerification) continue;
         callGraph.AddSource(impl);
         procToImpls[impl.Proc].Add(impl);
       }
-      foreach (var impl in program.Implementations) {
-        if (impl.SkipVerification) continue;
+      foreach (Declaration decl in program.TopLevelDeclarations) {
+        Implementation impl = decl as Implementation;
+        if (impl == null || impl.SkipVerification) continue;
         foreach (Block b in impl.Blocks) {
           foreach (Cmd c in b.Cmds) {
             CallCmd cc = c as CallCmd;
@@ -1195,7 +773,7 @@ namespace Microsoft.Boogie {
 
     public static Graph<Block/*!*/>/*!*/ GraphFromImpl(Implementation impl) {
       Contract.Requires(impl != null);
-      Contract.Ensures(cce.NonNullElements(Contract.Result<Graph<Block>>().Nodes));
+      Contract.Ensures(cce.NonNullElements(Contract.Result<Graph<Block>>().TopologicalSort()));
       Contract.Ensures(Contract.Result<Graph<Block>>() != null);
 
       Graph<Block/*!*/> g = new Graph<Block/*!*/>();
@@ -1276,9 +854,10 @@ namespace Microsoft.Boogie {
         procsWithIrreducibleLoops = new HashSet<string>();
         List<Implementation/*!*/>/*!*/ loopImpls = new List<Implementation/*!*/>();
         Dictionary<string, Dictionary<string, Block>> fullMap = new Dictionary<string, Dictionary<string, Block>>();
-        foreach (var impl in this.Implementations)
+        foreach (Declaration d in this.TopLevelDeclarations)
         {
-            if (impl.Blocks != null && impl.Blocks.Count > 0)
+            Implementation impl = d as Implementation;
+            if (impl != null && impl.Blocks != null && impl.Blocks.Count > 0)
             {
                 try
                 {
@@ -1291,41 +870,38 @@ namespace Microsoft.Boogie {
                     fullMap[impl.Name] = null;
                     procsWithIrreducibleLoops.Add(impl.Name);
 
-                    if (CommandLineOptions.Clo.ExtractLoopsUnrollIrreducible)
+                    // statically unroll loops in this procedure
+
+                    // First, build a map of the current blocks
+                    var origBlocks = new Dictionary<string, Block>();
+                    foreach (var blk in impl.Blocks) origBlocks.Add(blk.Label, blk);
+
+                    // unroll
+                    Block start = impl.Blocks[0];
+                    impl.Blocks = LoopUnroll.UnrollLoops(start, CommandLineOptions.Clo.RecursionBound, false);
+
+                    // Now construct the "map back" information
+                    // Resulting block label -> original block
+                    var blockMap = new Dictionary<string, Block>();
+                    foreach (var blk in impl.Blocks)
                     {
-                        // statically unroll loops in this procedure
-
-                        // First, build a map of the current blocks
-                        var origBlocks = new Dictionary<string, Block>();
-                        foreach (var blk in impl.Blocks) origBlocks.Add(blk.Label, blk);
-
-                        // unroll
-                        Block start = impl.Blocks[0];
-                        impl.Blocks = LoopUnroll.UnrollLoops(start, CommandLineOptions.Clo.RecursionBound, false);
-
-                        // Now construct the "map back" information
-                        // Resulting block label -> original block
-                        var blockMap = new Dictionary<string, Block>();
-                        foreach (var blk in impl.Blocks)
+                        var sl = LoopUnroll.sanitizeLabel(blk.Label);
+                        if (sl == blk.Label) blockMap.Add(blk.Label, blk);
+                        else
                         {
-                            var sl = LoopUnroll.sanitizeLabel(blk.Label);
-                            if (sl == blk.Label) blockMap.Add(blk.Label, blk);
-                            else
-                            {
-                                Contract.Assert(origBlocks.ContainsKey(sl));
-                                blockMap.Add(blk.Label, origBlocks[sl]);
-                            }
+                            Contract.Assert(origBlocks.ContainsKey(sl));
+                            blockMap.Add(blk.Label, origBlocks[sl]);
                         }
-                        fullMap[impl.Name] = blockMap;
                     }
+                    fullMap[impl.Name] = blockMap;
                 }
             }
         }
         foreach (Implementation/*!*/ loopImpl in loopImpls)
         {
             Contract.Assert(loopImpl != null);
-            AddTopLevelDeclaration(loopImpl);
-            AddTopLevelDeclaration(loopImpl.Proc);
+            TopLevelDeclarations.Add(loopImpl);
+            TopLevelDeclarations.Add(loopImpl.Proc);
         }
         return fullMap;
     }
@@ -1336,25 +912,33 @@ namespace Microsoft.Boogie {
       return visitor.VisitProgram(this);
     }
 
-    int extractedFunctionCount;
-    public string FreshExtractedFunctionName()
-    {
-      var c = System.Threading.Interlocked.Increment(ref extractedFunctionCount);
-      return string.Format("##extracted_function##{0}", c);
+    private List<GlobalVariable/*!*/> globals = null;
+    public List<GlobalVariable/*!*/>/*!*/ GlobalVariables() {
+      Contract.Ensures(cce.NonNullElements(Contract.Result<List<GlobalVariable>>()));
+      if (globals != null)
+        return globals;
+      globals = new List<GlobalVariable/*!*/>();
+      foreach (Declaration d in TopLevelDeclarations) {
+        GlobalVariable gvar = d as GlobalVariable;
+        if (gvar != null)
+          globals.Add(gvar);
+      }
+      return globals;
     }
 
     private int invariantGenerationCounter = 0;
 
-    public Constant MakeExistentialBoolean() {
+    public Constant MakeExistentialBoolean(int StageId) {
       Constant ExistentialBooleanConstant = new Constant(Token.NoToken, new TypedIdent(tok, "_b" + invariantGenerationCounter, Microsoft.Boogie.Type.Bool), false);
       invariantGenerationCounter++;
       ExistentialBooleanConstant.AddAttribute("existential", new object[] { Expr.True });
-      AddTopLevelDeclaration(ExistentialBooleanConstant);
+      ExistentialBooleanConstant.AddAttribute("stage_id", new object[] { new LiteralExpr(Token.NoToken, Microsoft.Basetypes.BigNum.FromInt(StageId)) });
+      TopLevelDeclarations.Add(ExistentialBooleanConstant);
       return ExistentialBooleanConstant;
     }
 
-    public PredicateCmd CreateCandidateInvariant(Expr e, string tag = null) {
-      Constant ExistentialBooleanConstant = MakeExistentialBoolean();
+    public PredicateCmd CreateCandidateInvariant(Expr e, string tag = null, int StageId = 0) {
+      Constant ExistentialBooleanConstant = MakeExistentialBoolean(StageId);
       IdentifierExpr ExistentialBoolean = new IdentifierExpr(Token.NoToken, ExistentialBooleanConstant);
       PredicateCmd invariant = new AssertCmd(Token.NoToken, Expr.Imp(ExistentialBoolean, e));
       if (tag != null)
@@ -1367,8 +951,8 @@ namespace Microsoft.Boogie {
   // Declarations
 
   [ContractClass(typeof(DeclarationContracts))]
-  public abstract class Declaration : Absy, ICarriesAttributes {
-    public QKeyValue Attributes { get; set; }
+  public abstract class Declaration : Absy {
+    public QKeyValue Attributes;
 
     public Declaration(IToken tok)
       : base(tok) {
@@ -1478,7 +1062,7 @@ namespace Microsoft.Boogie {
       QKeyValue kv;
       for (kv = this.Attributes; kv != null; kv = kv.Next) {
         if (kv.Key == name) {
-          kv.AddParams(vals);
+          kv.Params.AddRange(vals);
           break;
         }
       }
@@ -1518,22 +1102,10 @@ namespace Microsoft.Boogie {
   }
 
   public class Axiom : Declaration {
-    private Expr/*!*/ expression;
-
-    public Expr Expr {
-      get {
-        Contract.Ensures(Contract.Result<Expr>() != null);
-        return this.expression;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.expression = value;
-      }
-    }
-
+    public Expr/*!*/ Expr;
     [ContractInvariantMethod]
     void ExprInvariant() {
-      Contract.Invariant(this.expression != null);
+      Contract.Invariant(Expr != null);
     }
 
     public string Comment;
@@ -1548,7 +1120,7 @@ namespace Microsoft.Boogie {
       : base(tok) {
       Contract.Requires(tok != null);
       Contract.Requires(expr != null);
-      this.expression = expr;
+      Expr = expr;
       Comment = comment;
     }
 
@@ -1557,26 +1129,6 @@ namespace Microsoft.Boogie {
       Contract.Requires(expr != null);
       Contract.Requires(tok != null);
       this.Attributes = kv;
-    }
-
-    public bool DependenciesCollected { get; set; }
-
-    ISet<Function> functionDependencies;
-
-    public ISet<Function> FunctionDependencies
-    {
-      get { return functionDependencies; }
-    }
-
-    public void AddFunctionDependency(Function function)
-    {
-      Contract.Requires(function != null);
-
-      if (functionDependencies == null)
-      {
-        functionDependencies = new HashSet<Function>();
-      }
-      functionDependencies.Add(function);
     }
 
     public override void Emit(TokenTextWriter stream, int level) {
@@ -1646,16 +1198,6 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public int ResourceLimit
-    {
-      get
-      {
-        int rl = CommandLineOptions.Clo.Resourcelimit;
-        CheckIntAttribute("rlimit", ref rl);
-        return rl;
-      }
-    }
-
     public NamedDeclaration(IToken/*!*/ tok, string/*!*/ name)
       : base(tok) {
       Contract.Requires(tok != null);
@@ -1715,37 +1257,14 @@ namespace Microsoft.Boogie {
   }
 
   public class TypeSynonymDecl : NamedDeclaration {
-    private List<TypeVariable>/*!*/ typeParameters;
-
-    public List<TypeVariable> TypeParameters {
-      get {
-        Contract.Ensures(Contract.Result<List<TypeVariable>>() != null);
-        return this.typeParameters;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.typeParameters = value;
-      }
-    }
-
-    private Type/*!*/ body;
-
-    public Type Body {
-      get {
-        Contract.Ensures(Contract.Result<Type>() != null);
-        return this.body;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.body = value;
-      }
-    }
-    
+    public List<TypeVariable>/*!*/ TypeParameters;
+    public Type/*!*/ Body;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this.body != null);
-      Contract.Invariant(this.typeParameters != null);
+      Contract.Invariant(TypeParameters != null);
+      Contract.Invariant(Body != null);
     }
+
 
     public TypeSynonymDecl(IToken/*!*/ tok, string/*!*/ name,
                            List<TypeVariable>/*!*/ typeParams, Type/*!*/ body)
@@ -1754,8 +1273,8 @@ namespace Microsoft.Boogie {
       Contract.Requires(name != null);
       Contract.Requires(typeParams != null);
       Contract.Requires(body != null);
-      this.typeParameters = typeParams;
-      this.body = body;
+      this.TypeParameters = typeParams;
+      this.Body = body;
     }
     public TypeSynonymDecl(IToken/*!*/ tok, string/*!*/ name,
                            List<TypeVariable>/*!*/ typeParams, Type/*!*/ body, QKeyValue kv)
@@ -1764,8 +1283,8 @@ namespace Microsoft.Boogie {
       Contract.Requires(name != null);
       Contract.Requires(typeParams != null);
       Contract.Requires(body != null);
-      this.typeParameters = typeParams;
-      this.body = body;
+      this.TypeParameters = typeParams;
+      this.Body = body;
       this.Attributes = kv;
     }
     public override void Emit(TokenTextWriter stream, int level) {
@@ -1904,36 +1423,24 @@ namespace Microsoft.Boogie {
   }
 
   public abstract class Variable : NamedDeclaration {
-    private TypedIdent/*!*/ typedIdent;
-
-    public TypedIdent TypedIdent {
-      get {
-        Contract.Ensures(Contract.Result<TypedIdent>() != null);
-        return this.typedIdent;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.typedIdent = value;
-      }
-    }
-
+    public TypedIdent/*!*/ TypedIdent;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this.typedIdent != null);
+      Contract.Invariant(TypedIdent != null);
     }
 
     public Variable(IToken/*!*/ tok, TypedIdent/*!*/ typedIdent)
       : base(tok, typedIdent.Name) {
       Contract.Requires(tok != null);
       Contract.Requires(typedIdent != null);
-      this.typedIdent = typedIdent;
+      this.TypedIdent = typedIdent;
     }
 
     public Variable(IToken/*!*/ tok, TypedIdent/*!*/ typedIdent, QKeyValue kv)
       : base(tok, typedIdent.Name) {
       Contract.Requires(tok != null);
       Contract.Requires(typedIdent != null);
-      this.typedIdent = typedIdent;
+      this.TypedIdent = typedIdent;
       this.Attributes = kv;
     }
 
@@ -1963,10 +1470,6 @@ namespace Microsoft.Boogie {
     }
     public void ResolveWhere(ResolutionContext rc) {
       Contract.Requires(rc != null);
-      if (QKeyValue.FindBoolAttribute(Attributes, "assumption") && this.TypedIdent.WhereExpr != null)
-      {
-        rc.Error(tok, "assumption variable may not be declared with a where clause");
-      }
       if (this.TypedIdent.WhereExpr != null) {
         this.TypedIdent.WhereExpr.Resolve(rc);
       }
@@ -1976,10 +1479,6 @@ namespace Microsoft.Boogie {
       //Contract.Requires(tc != null);
       TypecheckAttributes(tc);
       this.TypedIdent.Typecheck(tc);
-      if (QKeyValue.FindBoolAttribute(Attributes, "assumption") && !this.TypedIdent.Type.IsBool)
-      {
-        tc.Error(tok, "assumption variable must be of type 'bool'");
-      }
     }
   }
 
@@ -2021,12 +1520,12 @@ namespace Microsoft.Boogie {
     // the <:-parents of the value of this constant. If the field is
     // null, no information about the parents is provided, which means
     // that the parental situation is unconstrained.
-    public readonly ReadOnlyCollection<ConstantParent/*!*/> Parents;
-
+    public readonly List<ConstantParent/*!*/> Parents;
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(cce.NonNullElements(Parents, true));
     }
+
 
     // if true, it is assumed that the immediate <:-children of the
     // value of this constant are completely specified
@@ -2054,16 +1553,16 @@ namespace Microsoft.Boogie {
     }
     public Constant(IToken/*!*/ tok, TypedIdent/*!*/ typedIdent,
                     bool unique,
-                    IEnumerable<ConstantParent/*!*/> parents, bool childrenComplete,
+                    List<ConstantParent/*!*/> parents, bool childrenComplete,
                     QKeyValue kv)
       : base(tok, typedIdent, kv) {
       Contract.Requires(tok != null);
       Contract.Requires(typedIdent != null);
-      Contract.Requires(cce.NonNullElements(parents, true));
+      Contract.Requires(parents == null || cce.NonNullElements(parents));
       Contract.Requires(typedIdent.Name != null && typedIdent.Name.Length > 0);
       Contract.Requires(typedIdent.WhereExpr == null);
       this.Unique = unique;
-      this.Parents = parents == null ? null : new ReadOnlyCollection<ConstantParent>(parents.ToList());
+      this.Parents = parents;
       this.ChildrenComplete = childrenComplete;
     }
     public override bool IsMutable {
@@ -2256,7 +1755,6 @@ namespace Microsoft.Boogie {
   }
   public class Incarnation : LocalVariable {
     public int incarnationNumber;
-    public readonly Variable OriginalVariable;
     public Incarnation(Variable/*!*/ var, int i) :
       base(
       var.tok,
@@ -2264,7 +1762,6 @@ namespace Microsoft.Boogie {
       ) {
       Contract.Requires(var != null);
       incarnationNumber = i;
-      OriginalVariable = var;
     }
 
   }
@@ -2300,37 +1797,13 @@ namespace Microsoft.Boogie {
 
   public abstract class DeclWithFormals : NamedDeclaration {
     public List<TypeVariable>/*!*/ TypeParameters;
-
-    private /*readonly--except in StandardVisitor*/ List<Variable>/*!*/ inParams, outParams;
-
-    public List<Variable>/*!*/ InParams {
-      get {
-        Contract.Ensures(Contract.Result<List<Variable>>() != null);
-        return this.inParams;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.inParams = value;
-      }
-    }
-
-    public List<Variable>/*!*/ OutParams
-    {
-      get {
-        Contract.Ensures(Contract.Result<List<Variable>>() != null);
-        return this.outParams;
-      }
-      set {
-        Contract.Requires(value != null);
-        this.outParams = value;
-      }
-    }
+    public /*readonly--except in StandardVisitor*/ List<Variable>/*!*/ InParams, OutParams;
 
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(TypeParameters != null);
-      Contract.Invariant(this.inParams != null);
-      Contract.Invariant(this.outParams != null);
+      Contract.Invariant(InParams != null);
+      Contract.Invariant(OutParams != null);
     }
 
     public DeclWithFormals(IToken tok, string name, List<TypeVariable> typeParams,
@@ -2342,92 +1815,16 @@ namespace Microsoft.Boogie {
       Contract.Requires(name != null);
       Contract.Requires(tok != null);
       this.TypeParameters = typeParams;
-      this.inParams = inParams;
-      this.outParams = outParams;
+      this.InParams = inParams;
+      this.OutParams = outParams;
     }
 
     protected DeclWithFormals(DeclWithFormals that)
       : base(that.tok, cce.NonNull(that.Name)) {
       Contract.Requires(that != null);
       this.TypeParameters = that.TypeParameters;
-      this.inParams = cce.NonNull(that.InParams);
-      this.outParams = cce.NonNull(that.OutParams);
-    }
-
-    public byte[] MD5Checksum_;
-    public byte[] MD5Checksum
-    {
-      get
-      {
-        if (MD5Checksum_ == null)
-        {
-          var c = Checksum;
-          if (c != null)
-          {
-            MD5Checksum_ = System.Security.Cryptography.MD5.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(c));
-          }
-        }
-        return MD5Checksum_;
-      }
-    }
-
-    public byte[] MD5DependencyChecksum_;
-    public byte[] MD5DependencyChecksum
-    {
-      get
-      {
-        Contract.Requires(DependenciesCollected);
-
-        if (MD5DependencyChecksum_ == null && MD5Checksum != null)
-        {
-          var c = MD5Checksum;
-          var transFuncDeps = new HashSet<Function>();
-          if (procedureDependencies != null)
-          {
-            foreach (var p in procedureDependencies)
-            {
-              if (p.FunctionDependencies != null)
-              {
-                foreach (var f in p.FunctionDependencies)
-                {
-                  transFuncDeps.Add(f);
-                }
-              }
-              var pc = p.MD5Checksum;
-              if (pc == null) { return null; }
-              c = ChecksumHelper.CombineChecksums(c, pc, true);
-            }
-          }
-          if (FunctionDependencies != null)
-          {
-            foreach (var f in FunctionDependencies)
-            {
-              transFuncDeps.Add(f);
-            }
-          }
-          var q = new Queue<Function>(transFuncDeps);
-          while (q.Any())
-          {
-            var f = q.Dequeue();
-            var fc = f.MD5Checksum;
-            if (fc == null) { return null; }
-            c = ChecksumHelper.CombineChecksums(c, fc, true);
-            if (f.FunctionDependencies != null)
-            {
-              foreach (var d in f.FunctionDependencies)
-              {
-                if (!transFuncDeps.Contains(d))
-                {
-                  transFuncDeps.Add(d);
-                  q.Enqueue(d);
-                }
-              }
-            }
-          }
-          MD5DependencyChecksum_ = c;
-        }
-        return MD5DependencyChecksum_;
-      }
+      this.InParams = that.InParams;
+      this.OutParams = that.OutParams;
     }
 
     public string Checksum
@@ -2438,87 +1835,14 @@ namespace Microsoft.Boogie {
       }
     }
 
-    string dependencyChecksum;
-    public string DependencyChecksum
-    {
-      get
-      {
-        if (dependencyChecksum == null && DependenciesCollected && MD5DependencyChecksum != null)
-        {
-          dependencyChecksum = BitConverter.ToString(MD5DependencyChecksum);
-        }
-        return dependencyChecksum;
-      }
-    }
-
-    public bool DependenciesCollected { get; set; }
-
-    ISet<Procedure> procedureDependencies;
-
-    public ISet<Procedure> ProcedureDependencies
-    {
-      get { return procedureDependencies; }
-    }
-
-    public void AddProcedureDependency(Procedure procedure)
-    {
-      Contract.Requires(procedure != null);
-
-      if (procedureDependencies == null)
-      {
-        procedureDependencies = new HashSet<Procedure>();
-      }
-      procedureDependencies.Add(procedure);
-    }
-
-    ISet<Function> functionDependencies;
-
-    public ISet<Function> FunctionDependencies
-    {
-      get { return functionDependencies; }
-    }
-
-    public void AddFunctionDependency(Function function)
-    {
-      Contract.Requires(function != null);
-
-      if (functionDependencies == null)
-      {
-        functionDependencies = new HashSet<Function>();
-      }
-      functionDependencies.Add(function);
-    }
-
-    public bool SignatureEquals(DeclWithFormals other)
-    {
-      Contract.Requires(other != null);
-
-      string sig = null;
-      string otherSig = null;
-      using (var strWr = new System.IO.StringWriter())
-      using (var tokTxtWr = new TokenTextWriter("<no file>", strWr, false, false))
-      {
-        EmitSignature(tokTxtWr, this is Function);
-        sig = strWr.ToString();
-      }
-
-      using (var otherStrWr = new System.IO.StringWriter())
-      using (var otherTokTxtWr = new TokenTextWriter("<no file>", otherStrWr, false, false))
-      {
-        EmitSignature(otherTokTxtWr, other is Function);
-        otherSig = otherStrWr.ToString();
-      }
-      return sig == otherSig;
-    }
+    public string DependenciesChecksum { get; set; }
 
     protected void EmitSignature(TokenTextWriter stream, bool shortRet) {
       Contract.Requires(stream != null);
       Type.EmitOptionalTypeParams(stream, TypeParameters);
       stream.Write("(");
-      stream.push();
       InParams.Emit(stream, true);
       stream.Write(")");
-      stream.sep();
 
       if (shortRet) {
         Contract.Assert(OutParams.Count == 1);
@@ -2529,7 +1853,6 @@ namespace Microsoft.Boogie {
         OutParams.Emit(stream, true);
         stream.Write(")");
       }
-      stream.pop();
     }
 
     // Register all type parameters at the resolution context
@@ -2666,33 +1989,10 @@ namespace Microsoft.Boogie {
     // the body is only set if the function is declared with {:inline}
     public Expr Body;
     public Axiom DefinitionAxiom;
-
-    public IList<Axiom> otherDefinitionAxioms;
-    public IEnumerable<Axiom> OtherDefinitionAxioms
-    {
-      get
-      {
-        return otherDefinitionAxioms;
-      }
-    }
-
-    public void AddOtherDefinitionAxiom(Axiom axiom)
-    {
-      Contract.Requires(axiom != null);
-
-      if (otherDefinitionAxioms == null)
-      {
-        otherDefinitionAxioms = new List<Axiom>();
-      }
-      otherDefinitionAxioms.Add(axiom);
-    }
-
     public bool doingExpansion;
 
     private bool neverTrigger;
     private bool neverTriggerComputed;
-
-    public string OriginalLambdaExprAsString;
 
     public Function(IToken tok, string name, List<Variable> args, Variable result)
       : this(tok, name, new List<TypeVariable>(), args, result, null) {
@@ -2846,14 +2146,14 @@ namespace Microsoft.Boogie {
       List<TypeVariable>/*!*/ quantifiedTypeVars = new List<TypeVariable>();
       foreach (TypeVariable/*!*/ t in TypeParameters) {
         Contract.Assert(t != null);
-        quantifiedTypeVars.Add(new TypeVariable(tok, t.Name));
+        quantifiedTypeVars.Add(new TypeVariable(Token.NoToken, t.Name));
       }
 
       Expr call = new NAryExpr(tok, new FunctionCall(new IdentifierExpr(tok, Name)), callArgs);
       // specify the type of the function, because it might be that
       // type parameters only occur in the output type
       call = Expr.CoerceType(tok, call, (Type)OutParams[0].TypedIdent.Type.Clone());
-      Expr def = Expr.Binary(tok, BinaryOperator.Opcode.Eq, call, definition);
+      Expr def = Expr.Eq(call, definition);
       if (quantifiedTypeVars.Count != 0 || dummies.Count != 0) {
         def = new ForallExpr(tok, quantifiedTypeVars, dummies,
                              kv,
@@ -2870,32 +2170,20 @@ namespace Microsoft.Boogie {
       : base(tok, name, args, result) { }
   }
 
-  public class Requires : Absy, ICarriesAttributes, IPotentialErrorNode<string, string> {
+  public class Requires : Absy, IPotentialErrorNode {
     public readonly bool Free;
-    
-    private Expr/*!*/ _condition;
-    
-    public Expr/*!*/ Condition {
-      get {
-        Contract.Ensures(Contract.Result<Expr>() != null);
-        return this._condition;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._condition = value;
-      }
-    }
-
+    public Expr/*!*/ Condition;
     public string Comment;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._condition != null);
+      Contract.Invariant(Condition != null);
+      Contract.Invariant(errorData == null || errorData is string);
     }
 
 
     // TODO: convert to use generics
-    private string errorData;
-    public string ErrorData {
+    private object errorData;
+    public object ErrorData {
       get {
         return errorData;
       }
@@ -2915,7 +2203,7 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public QKeyValue Attributes { get; set; }
+    public QKeyValue Attributes;
 
     public String ErrorMessage {
       get {
@@ -2928,7 +2216,7 @@ namespace Microsoft.Boogie {
       Contract.Requires(condition != null);
       Contract.Requires(token != null);
       this.Free = free;
-      this._condition = condition;
+      this.Condition = condition;
       this.Comment = comment;
       this.Attributes = kv;
     }
@@ -2976,38 +2264,22 @@ namespace Microsoft.Boogie {
         tc.Error(this, "preconditions must be of type bool");
       }
     }
-
-    public override Absy StdDispatch(StandardVisitor visitor) {
-      return visitor.VisitRequires(this);
-    }
   }
 
-  public class Ensures : Absy, ICarriesAttributes, IPotentialErrorNode<string, string> {
+  public class Ensures : Absy, IPotentialErrorNode {
     public readonly bool Free;
-
-    private Expr/*!*/ _condition;
- 	  
- 	  public Expr/*!*/ Condition {
- 	    get {
- 	      Contract.Ensures(Contract.Result<Expr>() != null);
- 	      return this._condition;
- 	    }
- 	    set {
- 	      Contract.Requires(value != null);
- 	      this._condition = value;
- 	    }
- 	  }
-
+    public Expr/*!*/ Condition;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._condition != null); 
+      Contract.Invariant(Condition != null);
+      Contract.Invariant(errorData == null || errorData is string);
     }
 
     public string Comment;
 
     // TODO: convert to use generics
-    private string errorData;
-    public string ErrorData {
+    private object errorData;
+    public object ErrorData {
       get {
         return errorData;
       }
@@ -3032,14 +2304,14 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public QKeyValue Attributes { get; set; }
+    public QKeyValue Attributes;
 
     public Ensures(IToken token, bool free, Expr/*!*/ condition, string comment, QKeyValue kv)
       : base(token) {
       Contract.Requires(condition != null);
       Contract.Requires(token != null);
       this.Free = free;
-      this._condition = condition; 
+      this.Condition = condition;
       this.Comment = comment;
       this.Attributes = kv;
     }
@@ -3079,16 +2351,31 @@ namespace Microsoft.Boogie {
       this.Condition.Resolve(rc);
     }
     
+    public bool IsAtomicSpecification
+    {
+        get
+        {
+            return
+                QKeyValue.FindIntAttribute(this.Attributes, "atomic", int.MaxValue) != int.MaxValue ||
+                QKeyValue.FindIntAttribute(this.Attributes, "right", int.MaxValue) != int.MaxValue ||
+                QKeyValue.FindIntAttribute(this.Attributes, "left", int.MaxValue) != int.MaxValue ||
+                QKeyValue.FindIntAttribute(this.Attributes, "both", int.MaxValue) != int.MaxValue;
+        }
+    }
+
     public override void Typecheck(TypecheckingContext tc) {
+      //Contract.Requires(tc != null);
+        
+      if (IsAtomicSpecification && !tc.Yields)
+      {
+          tc.Error(this, "atomic specification allowed only in a yielding procedure");
+          return;
+      }
       this.Condition.Typecheck(tc);
       Contract.Assert(this.Condition.Type != null);  // follows from postcondition of Expr.Typecheck
       if (!this.Condition.Type.Unify(Type.Bool)) {
         tc.Error(this, "postconditions must be of type bool");
       }
-    }
-
-    public override Absy StdDispatch(StandardVisitor visitor) {
-      return visitor.VisitEnsures(this);
     }
   }
 
@@ -3244,7 +2531,7 @@ namespace Microsoft.Boogie {
         e.Typecheck(tc);
       }
       bool oldYields = tc.Yields;
-      tc.Yields = QKeyValue.FindBoolAttribute(Attributes, CivlAttributes.YIELDS);
+      tc.Yields = QKeyValue.FindBoolAttribute(Attributes, "yields");
       foreach (Ensures/*!*/ e in Ensures) {
         Contract.Assert(e != null);
         e.Typecheck(tc);
@@ -3303,85 +2590,6 @@ namespace Microsoft.Boogie {
     // Both are used only when /inline is set.
     public List<Block/*!*/> OriginalBlocks;
     public List<Variable> OriginalLocVars;
-
-    public readonly ISet<byte[]> AssertionChecksums = new HashSet<byte[]>(ChecksumComparer.Default);
-
-    public sealed class ChecksumComparer : IEqualityComparer<byte[]>
-    {
-      static IEqualityComparer<byte[]> defaultComparer;
-      public static IEqualityComparer<byte[]> Default
-      {
-        get
-        {
-          if (defaultComparer == null)
-          {
-            defaultComparer = new ChecksumComparer();
-          }
-          return defaultComparer;
-        }
-      }
-
-      public bool Equals(byte[] x, byte[] y)
-      {
-        if (x == null || y == null)
-        {
-          return x == y;
-        }
-        else
-        {
-          return x.SequenceEqual(y);
-        }
-      }
-
-      public int GetHashCode(byte[] checksum)
-      {
-        if (checksum == null)
-        {
-          throw new ArgumentNullException("checksum");
-        }
-        else
-        {
-          var result = 17;
-          for (int i = 0; i < checksum.Length; i++)
-          {
-            result = result * 23 + checksum[i];
-          }
-          return result;
-        }
-      }
-    }
-
-    public void AddAssertionChecksum(byte[] checksum)
-    {
-      Contract.Requires(checksum != null);
-
-      if (AssertionChecksums != null)
-      {
-        AssertionChecksums.Add(checksum);
-      }
-    }
-
-    public ISet<byte[]> AssertionChecksumsInCachedSnapshot { get; set; }
-
-    public bool IsAssertionChecksumInCachedSnapshot(byte[] checksum)
-    {
-      Contract.Requires(AssertionChecksumsInCachedSnapshot != null);
-
-      return AssertionChecksumsInCachedSnapshot.Contains(checksum);
-    }
-
-    public IList<AssertCmd> RecycledFailingAssertions { get; protected set; }
-
-    public void AddRecycledFailingAssertion(AssertCmd assertion)
-    {
-      if (RecycledFailingAssertions == null)
-      {
-        RecycledFailingAssertions = new List<AssertCmd>();
-      }
-      RecycledFailingAssertions.Add(assertion);
-    }
-
-    public Cmd ExplicitAssumptionAboutCachedPrecondition { get; set; }
 
     // Strongly connected components
     private StronglyConnectedComponents<Block/*!*/> scc;
@@ -3451,106 +2659,6 @@ namespace Microsoft.Boogie {
           priority = 1;
         }
         return priority;
-      }
-    }
-
-    public IDictionary<byte[], object> ErrorChecksumToCachedError { get; private set; }
-
-    public bool IsErrorChecksumInCachedSnapshot(byte[] checksum)
-    {
-      Contract.Requires(ErrorChecksumToCachedError != null);
-
-      return ErrorChecksumToCachedError.ContainsKey(checksum);
-    }
-
-    public void SetErrorChecksumToCachedError(IEnumerable<Tuple<byte[], byte[], object>> errors)
-    {
-      Contract.Requires(errors != null);
-
-      ErrorChecksumToCachedError = new Dictionary<byte[], object>(ChecksumComparer.Default);
-      foreach (var kv in errors)
-      {
-        ErrorChecksumToCachedError[kv.Item1] = kv.Item3;
-        if (kv.Item2 != null)
-        {
-          ErrorChecksumToCachedError[kv.Item2] = null;
-        }
-      }
-    }
-
-    public bool HasCachedSnapshot
-    {
-      get
-      {
-        return ErrorChecksumToCachedError != null && AssertionChecksumsInCachedSnapshot != null;
-      }
-    }
-
-    public bool AnyErrorsInCachedSnapshot
-    {
-      get
-      {
-        Contract.Requires(ErrorChecksumToCachedError != null);
-
-        return ErrorChecksumToCachedError.Any();
-      }
-    }
-
-    IList<LocalVariable> injectedAssumptionVariables;
-    public IList<LocalVariable> InjectedAssumptionVariables
-    {
-      get
-      {
-        return injectedAssumptionVariables != null ? injectedAssumptionVariables : new List<LocalVariable>();
-      }
-    }
-
-    IList<LocalVariable> doomedInjectedAssumptionVariables;
-    public IList<LocalVariable> DoomedInjectedAssumptionVariables
-    {
-      get
-      {
-        return doomedInjectedAssumptionVariables != null ? doomedInjectedAssumptionVariables : new List<LocalVariable>();
-      }
-    }
-
-    public List<LocalVariable> RelevantInjectedAssumptionVariables(Dictionary<Variable, Expr> incarnationMap)
-    {
-      return InjectedAssumptionVariables.Where(v => { Expr e; if (incarnationMap.TryGetValue(v, out e)) { var le = e as LiteralExpr; return le == null || !le.IsTrue; } else { return false; } }).ToList();
-    }
-
-    public List<LocalVariable> RelevantDoomedInjectedAssumptionVariables(Dictionary<Variable, Expr> incarnationMap)
-    {
-      return DoomedInjectedAssumptionVariables.Where(v => { Expr e; if (incarnationMap.TryGetValue(v, out e)) { var le = e as LiteralExpr; return le == null || !le.IsTrue; } else { return false; } }).ToList();
-    }
-
-    public Expr ConjunctionOfInjectedAssumptionVariables(Dictionary<Variable, Expr> incarnationMap, out bool isTrue)
-    {
-      Contract.Requires(incarnationMap != null);
-
-      var vars = RelevantInjectedAssumptionVariables(incarnationMap).Select(v => incarnationMap[v]).ToList();
-      isTrue = vars.Count == 0;
-      return LiteralExpr.BinaryTreeAnd(vars);
-    }
-
-    public void InjectAssumptionVariable(LocalVariable variable, bool isDoomed = false)
-    {
-      LocVars.Add(variable);
-      if (isDoomed)
-      {
-        if (doomedInjectedAssumptionVariables == null)
-        {
-          doomedInjectedAssumptionVariables = new List<LocalVariable>();
-        }
-        doomedInjectedAssumptionVariables.Add(variable);
-      }
-      else
-      {
-        if (injectedAssumptionVariables == null)
-        {
-          injectedAssumptionVariables = new List<LocalVariable>();
-        }
-        injectedAssumptionVariables.Add(variable);
       }
     }
 
@@ -3703,7 +2811,6 @@ namespace Microsoft.Boogie {
         // already resolved
         return;
       }
-
       DeclWithFormals dwf = rc.LookUpProcedure(cce.NonNull(this.Name));
       Proc = dwf as Procedure;
       if (dwf == null) {
@@ -3779,7 +2886,7 @@ namespace Microsoft.Boogie {
       List<IdentifierExpr> oldFrame = tc.Frame;
       bool oldYields = tc.Yields;
       tc.Frame = Proc.Modifies;
-      tc.Yields = QKeyValue.FindBoolAttribute(Proc.Attributes, CivlAttributes.YIELDS);
+      tc.Yields = QKeyValue.FindBoolAttribute(Proc.Attributes, "yields");
       foreach (Block b in Blocks) {
         b.Typecheck(tc);
       }
@@ -3869,7 +2976,7 @@ namespace Microsoft.Boogie {
 
         if (CommandLineOptions.Clo.PrintWithUniqueASTIds) {
           Console.WriteLine("Implementation.GetImplFormalMap on {0}:", this.Name);
-          using (TokenTextWriter stream = new TokenTextWriter("<console>", Console.Out, /*setTokens=*/false, /*pretty=*/ false)) {
+          using (TokenTextWriter stream = new TokenTextWriter("<console>", Console.Out, false)) {
             foreach (var e in map) {
               Console.Write("  ");
               cce.NonNull((Variable/*!*/)e.Key).Emit(stream, 0);
@@ -4048,90 +3155,17 @@ namespace Microsoft.Boogie {
       Contract.Ensures(Contract.Result<Absy>() != null);
       return visitor.VisitImplementation(this);
     }
-
-    public void FreshenCaptureStates() {
-
-      // Assume commands with the "captureState" attribute allow model states to be
-      // captured for error reporting.
-      // Some program transformations, such as loop unrolling, duplicate parts of the
-      // program, leading to "capture-state-assumes" being duplicated.  This leads
-      // to ambiguity when getting a state from the model.
-      // This method replaces the key of every "captureState" attribute with something
-      // unique
-
-      int FreshCounter = 0;
-      foreach(var b in Blocks) {
-        List<Cmd> newCmds = new List<Cmd>();
-        for (int i = 0; i < b.Cmds.Count(); i++) {
-          var a = b.Cmds[i] as AssumeCmd;
-          if (a != null && (QKeyValue.FindStringAttribute(a.Attributes, "captureState") != null)) {
-            string StateName = QKeyValue.FindStringAttribute(a.Attributes, "captureState");
-            newCmds.Add(new AssumeCmd(Token.NoToken, a.Expr, FreshenCaptureState(a.Attributes, FreshCounter)));
-            FreshCounter++;
-          }
-          else {
-            newCmds.Add(b.Cmds[i]);
-          }
-        }
-        b.Cmds = newCmds;
-      }
-    }
-
-    private QKeyValue FreshenCaptureState(QKeyValue Attributes, int FreshCounter) {
-      // Returns attributes identical to Attributes, but:
-      // - reversed (for ease of implementation; should not matter)
-      // - with the value for "captureState" replaced by a fresh value
-      Contract.Requires(QKeyValue.FindStringAttribute(Attributes, "captureState") != null);
-      string FreshValue = QKeyValue.FindStringAttribute(Attributes, "captureState") + "$renamed$" + Name + "$" + FreshCounter;
-
-      QKeyValue result = null;
-      while (Attributes != null) {
-        if (Attributes.Key.Equals("captureState")) {
-          result = new QKeyValue(Token.NoToken, Attributes.Key, new List<object>() { FreshValue }, result);
-        } else {
-          result = new QKeyValue(Token.NoToken, Attributes.Key, Attributes.Params, result);
-        }
-        Attributes = Attributes.Next;
-      }
-      return result;
-    }
-
   }
 
 
   public class TypedIdent : Absy {
     public const string NoName = "";
-    
-    private string/*!*/ _name;
-    
-    public string/*!*/ Name {
-      get {
-        Contract.Ensures(Contract.Result<string>() != null);
-        return this._name;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._name = value;
-      }
-    }
-
-    private Type/*!*/ _type;
-
-    public Type/*!*/ Type {
-      get {
-        Contract.Ensures(Contract.Result<Type>() != null);
-        return this._type;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._type = value;
-      }
-    }
-
+    public string/*!*/ Name;
+    public Type/*!*/ Type;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._name != null);
-      Contract.Invariant(this._type != null);
+      Contract.Invariant(Name != null);
+      Contract.Invariant(Type != null);
     }
 
     public Expr WhereExpr;
@@ -4151,8 +3185,8 @@ namespace Microsoft.Boogie {
       Contract.Requires(name != null);
       Contract.Requires(type != null);
       Contract.Ensures(this.WhereExpr == whereExpr);
-      this._name = name;
-      this._type = type;
+      this.Name = name;
+      this.Type = type;
       this.WhereExpr = whereExpr;
     }
     public bool HasName {
@@ -4163,17 +3197,14 @@ namespace Microsoft.Boogie {
     public void Emit(TokenTextWriter stream) {
       Contract.Requires(stream != null);
       stream.SetToken(this);
-      stream.push();
       if (this.Name != NoName) {
         stream.Write("{0}: ", TokenTextWriter.SanitizeIdentifier(this.Name));
       }
       this.Type.Emit(stream);
       if (this.WhereExpr != null) {
-        stream.sep();
         stream.Write(" where ");
         this.WhereExpr.Emit(stream);
       }
-      stream.pop();
     }
     public override void Resolve(ResolutionContext rc) {
       //Contract.Requires(rc != null);
@@ -4217,7 +3248,6 @@ namespace Microsoft.Boogie {
   }
 
   public static class Emitter {
-
     public static void Emit(this List<Declaration/*!*/>/*!*/ decls, TokenTextWriter stream) {
       Contract.Requires(stream != null);
       Contract.Requires(cce.NonNullElements(decls));
@@ -4245,18 +3275,15 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public static void Emit(this IList<Expr> ts, TokenTextWriter stream) {
+    public static void Emit(this List<Expr> ts, TokenTextWriter stream) {
       Contract.Requires(stream != null);
       string sep = "";
-      stream.push();
       foreach (Expr/*!*/ e in ts) {
         Contract.Assert(e != null);
         stream.Write(sep);
         sep = ", ";
-        stream.sep();
         e.Emit(stream);
       }
-      stream.pop();
     }
 
     public static void Emit(this List<IdentifierExpr> ids, TokenTextWriter stream, bool printWhereComments) {
@@ -4279,15 +3306,12 @@ namespace Microsoft.Boogie {
     public static void Emit(this List<Variable> vs, TokenTextWriter stream, bool emitAttributes) {
       Contract.Requires(stream != null);
       string sep = "";
-      stream.push();
       foreach (Variable/*!*/ v in vs) {
         Contract.Assert(v != null);
         stream.Write(sep);
         sep = ", ";
-        stream.sep();
         v.EmitVitals(stream, 0, emitAttributes);
       }
-      stream.pop();
     }
 
     public static void Emit(this List<Type> tys, TokenTextWriter stream, string separator) {
@@ -4330,42 +3354,24 @@ namespace Microsoft.Boogie {
     }
   }
   public class AtomicRE : RE {
-    private Block/*!*/ _b;
-
-    public Block b
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<Block>() != null);
-        return this._b;
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        this._b = value;
-      }
-    }
-
+    public Block/*!*/ b;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._b != null);
+      Contract.Invariant(b != null);
     }
 
     public AtomicRE(Block block) {
       Contract.Requires(block != null);
-      this._b = block;
+      b = block;
     }
-
     public override void Resolve(ResolutionContext rc) {
       //Contract.Requires(rc != null);
       b.Resolve(rc);
     }
-
     public override void Typecheck(TypecheckingContext tc) {
       //Contract.Requires(tc != null);
       b.Typecheck(tc);
     }
-
     public override void Emit(TokenTextWriter stream, int level) {
       //Contract.Requires(stream != null);
       b.Emit(stream, level);
@@ -4388,49 +3394,24 @@ namespace Microsoft.Boogie {
     }
   }
   public class Sequential : CompoundRE {
-    private RE/*!*/ _first;
-
-    public RE/*!*/ first {
-      get {
-        Contract.Ensures(Contract.Result<RE>() != null);
-        return this._first;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._first = value;
-      }
-    }
-
-    private RE/*!*/ _second;
-
-    public RE/*!*/ second {
-      get {
-        Contract.Ensures(Contract.Result<RE>() != null);
-        return this._second;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._second = value;
-      }
-    }
-
+    public RE/*!*/ first;
+    public RE/*!*/ second;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._first != null);
-      Contract.Invariant(this._second != null);
+      Contract.Invariant(first != null);
+      Contract.Invariant(second != null);
     }
 
-    public Sequential(RE first, RE second) {
-      Contract.Requires(first != null);
-      Contract.Requires(second != null);
-      this._first = first;
-      this._second = second;
+    public Sequential(RE a, RE b) {
+      Contract.Requires(b != null);
+      Contract.Requires(a != null);
+      first = a;
+      second = b;
     }
-
     public override void Emit(TokenTextWriter stream, int level) {
       //Contract.Requires(stream != null);
       stream.WriteLine();
-      stream.WriteLine("{0};", Indent(stream.UseForComputingChecksums ? 0 : level));
+      stream.WriteLine("{0};", Indent(level));
       first.Emit(stream, level + 1);
       second.Emit(stream, level + 1);
     }
@@ -4444,31 +3425,18 @@ namespace Microsoft.Boogie {
   public class Choice : CompoundRE {
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this._rs != null);
+      Contract.Invariant(rs != null);
     }
 
-    private List<RE>/*!*/ _rs;
-    
-    public List<RE>/*!*/ rs { //Rename this (and _rs) if possible
-      get {
-        Contract.Ensures(Contract.Result<List<RE>>() != null);
-        return this._rs;
-      }
-      set {
-        Contract.Requires(value != null);
-        this._rs = value;
-      }
-    }
-
+    public List<RE>/*!*/ rs;
     public Choice(List<RE> operands) {
       Contract.Requires(operands != null);
-      this._rs = operands;
+      rs = operands;
     }
-
     public override void Emit(TokenTextWriter stream, int level) {
       //Contract.Requires(stream != null);
       stream.WriteLine();
-      stream.WriteLine("{0}[]", Indent(stream.UseForComputingChecksums ? 0 : level));
+      stream.WriteLine("{0}[]", Indent(level));
       foreach (RE/*!*/ r in rs) {
         Contract.Assert(r != null);
         r.Emit(stream, level + 1);

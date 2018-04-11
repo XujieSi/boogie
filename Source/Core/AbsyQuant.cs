@@ -1,4 +1,4 @@
-﻿//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 //
 // Copyright (C) Microsoft Corporation.  All Rights Reserved.
 //
@@ -35,7 +35,7 @@ namespace Microsoft.Boogie {
         throw new NotImplementedException();
       }
     }
-    public BinderExprContracts():base(null,null,null,null,null,false){
+    public BinderExprContracts():base(null,null,null,null,null){
   }
 
     public override Type ShallowType {
@@ -45,23 +45,11 @@ namespace Microsoft.Boogie {
     }
   }
   [ContractClass(typeof(BinderExprContracts))]
-  public abstract class BinderExpr : Expr, ICarriesAttributes {
+  public abstract class BinderExpr : Expr {
     public List<TypeVariable>/*!*/ TypeParameters;
     public List<Variable>/*!*/ Dummies;
-    public QKeyValue Attributes { get; set; }
-    // FIXME: Protect the above Fields
-    public Expr _Body;
-    public Expr/*!*/ Body {
-      get {
-        return _Body;
-      }
-      set {
-        if (Immutable)
-          throw new InvalidOperationException ("Cannot change the Body of an immutable BinderExpr");
-
-        _Body = value;
-      }
-    }
+    public QKeyValue Attributes;
+    public Expr/*!*/ Body;
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(TypeParameters != null);
@@ -69,9 +57,11 @@ namespace Microsoft.Boogie {
       Contract.Invariant(Body != null);
     }
 
+
     public BinderExpr(IToken/*!*/ tok, List<TypeVariable>/*!*/ typeParameters,
-                      List<Variable>/*!*/ dummies, QKeyValue kv, Expr/*!*/ body, bool immutable)
-      : base(tok, immutable) {
+                      List<Variable>/*!*/ dummies, QKeyValue kv, Expr/*!*/ body)
+      : base(tok)
+      {
       Contract.Requires(tok != null);
       Contract.Requires(typeParameters != null);
       Contract.Requires(dummies != null);
@@ -80,80 +70,35 @@ namespace Microsoft.Boogie {
       TypeParameters = typeParameters;
       Dummies = dummies;
       Attributes = kv;
-      _Body = body;
-      if (immutable)
-        CachedHashCode = ComputeHashCode();
+      Body = body;
     }
 
     abstract public BinderKind Kind {
       get;
     }
 
-    protected static bool CompareAttributesAndTriggers = false;
-
-    public static bool EqualWithAttributesAndTriggers(object a, object b) {
-      CompareAttributesAndTriggers = true;
-      var res = object.Equals(a, b);
-      Contract.Assert(CompareAttributesAndTriggers);
-      CompareAttributesAndTriggers = false;
-      return res;
-    }
-
     [Pure]
     [Reads(ReadsAttribute.Reads.Nothing)]
     public override bool Equals(object obj) {
-      return BinderEquals(obj);
-    }
-
-    public bool BinderEquals(object obj) {
-      if (obj == null) {
+      if (obj == null)
         return false;
-      }
       if (!(obj is BinderExpr) ||
-          this.Kind != ((BinderExpr) obj).Kind) {
+          this.Kind != ((BinderExpr)obj).Kind)
         return false;
-      }
 
-      var other = (BinderExpr) obj;
-
-      return this.TypeParameters.SequenceEqual(other.TypeParameters)
-             && this.Dummies.SequenceEqual(other.Dummies)
-             && (!CompareAttributesAndTriggers || object.Equals(this.Attributes, other.Attributes))
+      BinderExpr other = (BinderExpr)obj;
+      // Note, we consider quantifiers equal modulo the Triggers.
+      return object.Equals(this.TypeParameters, other.TypeParameters)
+             && object.Equals(this.Dummies, other.Dummies)
              && object.Equals(this.Body, other.Body);
     }
 
     [Pure]
-    public override int GetHashCode()
-    {
-      if (Immutable)
-        return CachedHashCode;
-      else
-        return ComputeHashCode();
-    }
-
-    [Pure]
-    public override int ComputeHashCode() {
-      // Note, we don't hash triggers and attributes
-
-      // DO NOT USE Dummies.GetHashCode() because we want structurally
-      // identical Expr to have the same hash code **not** identical references
-      // to have the same hash code.
-      int h = 0;
-      foreach (var dummyVar in this.Dummies) {
-        h = ( 53 * h ) + dummyVar.GetHashCode();
-      }
-
+    public override int GetHashCode() {
+      int h = this.Dummies.GetHashCode();
+      // Note, we consider quantifiers equal modulo the Triggers.
       h ^= this.Body.GetHashCode();
-
-      // DO NOT USE TypeParameters.GetHashCode() because we want structural
-      // identical Expr to have the same hash code **not** identical references
-      // to have the same hash code.
-      int h2 = 0;
-      foreach (var typeParam in this.TypeParameters) {
-        h2 = ( 97 * h2 ) + typeParam.GetHashCode();
-      }
-
-      h = h * 5 + h2;
+      h = h * 5 + this.TypeParameters.GetHashCode();
       h *= ((int)Kind + 1);
       return h;
     }
@@ -168,24 +113,20 @@ namespace Microsoft.Boogie {
 
     public override void Emit(TokenTextWriter stream, int contextBindingStrength, bool fragileContext) {
       //Contract.Requires(stream != null);
-      stream.push();
       stream.Write(this, "({0}", Kind.ToString().ToLower());
       this.EmitTypeHint(stream);
       Type.EmitOptionalTypeParams(stream, TypeParameters);
       stream.Write(this, " ");
       this.Dummies.Emit(stream, true);
       stream.Write(" :: ");
-      stream.sep();
       for (QKeyValue kv = this.Attributes; kv != null; kv = kv.Next) {
         kv.Emit(stream);
         stream.Write(" ");
       }
       this.EmitTriggers(stream);
-      stream.sep();
 
       this.Body.Emit(stream);
       stream.Write(")");
-      stream.pop();
     }
 
     protected virtual void ResolveTriggers(ResolutionContext rc) {
@@ -226,33 +167,28 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public override void ComputeFreeVariables(Set freeVars) {
+    public override void ComputeFreeVariables(Set /*Variable*/ freeVars) {
       //Contract.Requires(freeVars != null);
-      ComputeBinderFreeVariables(TypeParameters, Dummies, Body, Attributes, freeVars);
-    }
-
-    public static void ComputeBinderFreeVariables(List<TypeVariable> typeParameters, List<Variable> dummies, Expr body, QKeyValue attributes, Set freeVars) {
-      Contract.Requires(dummies != null);
-      Contract.Requires(body != null);
-
-      foreach (var v in dummies) {
+      foreach (Variable/*!*/ v in Dummies) {
         Contract.Assert(v != null);
         Contract.Assert(!freeVars[v]);
       }
-      body.ComputeFreeVariables(freeVars);
-      for (var a = attributes; a != null; a = a.Next) {
-        foreach (var o in a.Params) {
-          var e = o as Expr;
-          if (e != null) {
-            e.ComputeFreeVariables(freeVars);
-          }
+      Body.ComputeFreeVariables(freeVars);
+      foreach (Variable/*!*/ v in Dummies) {
+        Contract.Assert(v != null);
+        foreach (TypeVariable/*!*/ w in v.TypedIdent.Type.FreeVariables) {
+          Contract.Assert(w != null);
+          freeVars.Add(w);
         }
       }
-      foreach (var v in dummies) {
-        freeVars.AddRange(v.TypedIdent.Type.FreeVariables);
+      foreach (Variable/*!*/ v in Dummies) {
+        Contract.Assert(v != null);
+        freeVars.Remove(v);
       }
-      freeVars.RemoveRange(dummies);
-      freeVars.RemoveRange(typeParameters);
+      foreach (TypeVariable/*!*/ v in TypeParameters) {
+        Contract.Assert(v != null);
+        freeVars.Remove(v);
+      }
     }
 
     protected List<TypeVariable> GetUnmentionedTypeParameters() {
@@ -271,49 +207,22 @@ namespace Microsoft.Boogie {
 
   public class QKeyValue : Absy {
     public readonly string/*!*/ Key;
-    private readonly List<object/*!*/>/*!*/ _params;  // each element is either a string or an Expr
-
-    public void AddParam(object p)
-    {
-      Contract.Requires(p != null);
-      this._params.Add(p);
-    }
-
-    public void AddParams(IEnumerable<object> ps)
-    {
-      Contract.Requires(cce.NonNullElements(ps));
-      this._params.AddRange(ps);
-    }
-
-    public void ClearParams()
-    {
-      this._params.Clear();
-    }
-
-    public IList<object> Params
-    {
-      get
-      {
-        Contract.Ensures(cce.NonNullElements(Contract.Result<IList<object>>()));
-        Contract.Ensures(Contract.Result<IList<object>>().IsReadOnly);
-        return this._params.AsReadOnly();
-      }
-    }
-
+    public readonly List<object/*!*/>/*!*/ Params;  // each element is either a string or an Expr
     public QKeyValue Next;
     [ContractInvariantMethod]
     void ObjectInvariant() {
       Contract.Invariant(Key != null);
-      Contract.Invariant(cce.NonNullElements(this._params));
+      Contract.Invariant(cce.NonNullElements(Params));
     }
 
-    public QKeyValue(IToken tok, string key, IList<object/*!*/>/*!*/ parameters, QKeyValue next)
+
+    public QKeyValue(IToken tok, string key, [Captured] List<object/*!*/>/*!*/ parameters, QKeyValue next)
       : base(tok) {
       Contract.Requires(key != null);
       Contract.Requires(tok != null);
       Contract.Requires(cce.NonNullElements(parameters));
       Key = key;
-      this._params = new List<object>(parameters);
+      Params = parameters;
       Next = next;
     }
 
@@ -338,17 +247,6 @@ namespace Microsoft.Boogie {
 
     public override void Resolve(ResolutionContext rc) {
       //Contract.Requires(rc != null);
-
-      if ((Key == "minimize" || Key == "maximize") && Params.Count != 1)
-      {
-        rc.Error(this, "attributes :minimize and :maximize accept only one argument");
-      }
-
-      if (Key == "verified_under" && Params.Count != 1)
-      {
-        rc.Error(this, "attribute :verified_under accepts only one argument");
-      }
-
       foreach (object p in Params) {
         if (p is Expr) {
           ((Expr)p).Resolve(rc);
@@ -359,20 +257,8 @@ namespace Microsoft.Boogie {
     public override void Typecheck(TypecheckingContext tc) {
       //Contract.Requires(tc != null);
       foreach (object p in Params) {
-        var expr = p as Expr;
-        if (expr != null) {
-          expr.Typecheck(tc);
-        }
-        if ((Key == "minimize" || Key == "maximize")
-            && (expr == null || !(expr.Type.IsInt || expr.Type.IsReal || expr.Type.IsBv)))
-        {
-          tc.Error(this, "attributes :minimize and :maximize accept only one argument of type int, real or bv");
-          break;
-        }
-        if (Key == "verified_under" && (expr == null || !expr.Type.IsBool))
-        {
-          tc.Error(this, "attribute :verified_under accepts only one argument of type bool");
-          break;
+        if (p is Expr) {
+          ((Expr)p).Typecheck(tc);
         }
       }
     }
@@ -385,7 +271,6 @@ namespace Microsoft.Boogie {
       current.Next = other;
     }
     // Look for {:name string} in list of attributes.
-    [Pure]
     public static string FindStringAttribute(QKeyValue kv, string name) {
       Contract.Requires(name != null);
       for (; kv != null; kv = kv.Next) {
@@ -436,68 +321,37 @@ namespace Microsoft.Boogie {
         newParams.Add(o);
       return new QKeyValue(tok, Key, newParams, (Next == null) ? null : (QKeyValue)Next.Clone());
     }
-
-    public override Absy StdDispatch(StandardVisitor visitor) {
-      return visitor.VisitQKeyValue(this);
-    }
-
-    public override bool Equals(object obj) {
-      var other = obj as QKeyValue;
-      if (other == null) {
-        return false;
-      } else {
-        return Key == other.Key && object.Equals(Params, other.Params) &&
-               (Next == null
-                 ? other.Next == null
-                 : object.Equals(Next, other.Next));
-      }
-    }
-
-    public override int GetHashCode() {
-      throw new NotImplementedException();
-    }
   }
 
   public class Trigger : Absy {
     public readonly bool Pos;
     [Rep]
-    private List<Expr>/*!*/ tr;
-
-    public IList<Expr>/*!*/ Tr
-    {
-      get
-      {
-        Contract.Ensures(Contract.Result<IList<Expr>>() != null);
-        Contract.Ensures(Contract.Result<IList<Expr>>().Count >= 1);
-        Contract.Ensures(this.Pos || Contract.Result<IList<Expr>>().Count == 1);
-        return this.tr.AsReadOnly();
-      }
-      set
-      {
-        Contract.Requires(value != null);
-        Contract.Requires(value.Count >= 1);
-        Contract.Requires(this.Pos || value.Count == 1);
-        this.tr = new List<Expr>(value);
-      }
-    }
-
+    public List<Expr>/*!*/ Tr;
     [ContractInvariantMethod]
     void ObjectInvariant() {
-      Contract.Invariant(this.tr != null);
-      Contract.Invariant(this.tr.Count >= 1);
-      Contract.Invariant(Pos || this.tr.Count == 1);
+      Contract.Invariant(Tr != null);
+      Contract.Invariant(1 <= Tr.Count);
+      Contract.Invariant(Pos || Tr.Count == 1);
     }
 
     public Trigger Next;
 
-    public Trigger(IToken/*!*/ tok, bool pos, IEnumerable<Expr>/*!*/ tr, Trigger next = null)
+    public Trigger(IToken tok, bool pos, List<Expr> tr)
+      : this(tok, pos, tr, null) {
+      Contract.Requires(tr != null);
+      Contract.Requires(tok != null);
+      Contract.Requires(1 <= tr.Count);
+      Contract.Requires(pos || tr.Count == 1);
+    }
+
+    public Trigger(IToken/*!*/ tok, bool pos, List<Expr>/*!*/ tr, Trigger next)
       : base(tok) {
       Contract.Requires(tok != null);
       Contract.Requires(tr != null);
-      Contract.Requires(tr.Count() >= 1);
-      Contract.Requires(pos || tr.Count() == 1);
+      Contract.Requires(1 <= tr.Count);
+      Contract.Requires(pos || tr.Count == 1);
       this.Pos = pos;
-      this.Tr = new List<Expr>(tr);
+      this.Tr = tr;
       this.Next = next;
     }
 
@@ -564,48 +418,34 @@ namespace Microsoft.Boogie {
       Contract.Ensures(Contract.Result<Absy>() != null);
       return visitor.VisitTrigger(this);
     }
-
-    public override bool Equals(object obj) {
-      var other = obj as Trigger;
-      if (other == null) {
-        return false;
-      } else {
-        return this.Tr.SequenceEqual(other.Tr) && 
-          (Next == null ? other.Next == null : object.Equals(Next, other.Next));
-      }
-    }
-
-    public override int GetHashCode() {
-      throw new NotImplementedException();
-    }
   }
 
   public class ForallExpr : QuantifierExpr {
     public ForallExpr(IToken/*!*/ tok, List<TypeVariable>/*!*/ typeParams,
-                      List<Variable>/*!*/ dummies, QKeyValue kv, Trigger triggers, Expr/*!*/ body, bool immutable=false)
-      : base(tok, typeParams, dummies, kv, triggers, body, immutable) {
+                      List<Variable>/*!*/ dummies, QKeyValue kv, Trigger triggers, Expr/*!*/ body)
+      : base(tok, typeParams, dummies, kv, triggers, body) {
       Contract.Requires(tok != null);
       Contract.Requires(typeParams != null);
       Contract.Requires(dummies != null);
       Contract.Requires(body != null);
       Contract.Requires(dummies.Count + typeParams.Count > 0);
     }
-    public ForallExpr(IToken tok, List<Variable> dummies, Trigger triggers, Expr body, bool immutable=false)
-      : base(tok, new List<TypeVariable>(), dummies, null, triggers, body, immutable) {
+    public ForallExpr(IToken tok, List<Variable> dummies, Trigger triggers, Expr body)
+      : base(tok, new List<TypeVariable>(), dummies, null, triggers, body) {
       Contract.Requires(body != null);
       Contract.Requires(dummies != null);
       Contract.Requires(tok != null);
       Contract.Requires(dummies.Count > 0);
     }
-    public ForallExpr(IToken tok, List<Variable> dummies, Expr body, bool immutable=false)
-      : base(tok, new List<TypeVariable>(), dummies, null, null, body, immutable) {
+    public ForallExpr(IToken tok, List<Variable> dummies, Expr body)
+      : base(tok, new List<TypeVariable>(), dummies, null, null, body) {
       Contract.Requires(body != null);
       Contract.Requires(dummies != null);
       Contract.Requires(tok != null);
       Contract.Requires(dummies.Count > 0);
     }
-    public ForallExpr(IToken tok, List<TypeVariable> typeParams, List<Variable> dummies, Expr body, bool immutable=false)
-      : base(tok, typeParams, dummies, null, null, body, immutable) {
+    public ForallExpr(IToken tok, List<TypeVariable> typeParams, List<Variable> dummies, Expr body)
+      : base(tok, typeParams, dummies, null, null, body) {
       Contract.Requires(body != null);
       Contract.Requires(dummies != null);
       Contract.Requires(typeParams != null);
@@ -628,23 +468,23 @@ namespace Microsoft.Boogie {
 
   public class ExistsExpr : QuantifierExpr {
     public ExistsExpr(IToken/*!*/ tok, List<TypeVariable>/*!*/ typeParams, List<Variable>/*!*/ dummies,
-                      QKeyValue kv, Trigger triggers, Expr/*!*/ body, bool immutable=false)
-      : base(tok, typeParams, dummies, kv, triggers, body, immutable) {
+                      QKeyValue kv, Trigger triggers, Expr/*!*/ body)
+      : base(tok, typeParams, dummies, kv, triggers, body) {
       Contract.Requires(tok != null);
       Contract.Requires(typeParams != null);
       Contract.Requires(dummies != null);
       Contract.Requires(body != null);
       Contract.Requires(dummies.Count + typeParams.Count > 0);
     }
-    public ExistsExpr(IToken tok, List<Variable> dummies, Trigger triggers, Expr body, bool immutable=false)
-      : base(tok, new List<TypeVariable>(), dummies, null, triggers, body, immutable) {
+    public ExistsExpr(IToken tok, List<Variable> dummies, Trigger triggers, Expr body)
+      : base(tok, new List<TypeVariable>(), dummies, null, triggers, body) {
       Contract.Requires(body != null);
       Contract.Requires(dummies != null);
       Contract.Requires(tok != null);
       Contract.Requires(dummies.Count > 0);
     }
-    public ExistsExpr(IToken tok, List<Variable> dummies, Expr body, bool immutable=false)
-      : base(tok, new List<TypeVariable>(), dummies, null, null, body, immutable) {
+    public ExistsExpr(IToken tok, List<Variable> dummies, Expr body)
+      : base(tok, new List<TypeVariable>(), dummies, null, null, body) {
       Contract.Requires(body != null);
       Contract.Requires(dummies != null);
       Contract.Requires(tok != null);
@@ -667,16 +507,17 @@ namespace Microsoft.Boogie {
   public abstract class QuantifierExpr : BinderExpr {
     public Trigger Triggers;
 
-    static int SkolemIds = -1;
+    static int SkolemIds = 0;
     public static int GetNextSkolemId() {
-      return System.Threading.Interlocked.Increment(ref SkolemIds);
+      SkolemIds++;
+      return SkolemIds;
     }
 
     public readonly int SkolemId;
 
     public QuantifierExpr(IToken/*!*/ tok, List<TypeVariable>/*!*/ typeParameters,
-                          List<Variable>/*!*/ dummies, QKeyValue kv, Trigger triggers, Expr/*!*/ body, bool immutable)
-      : base(tok, typeParameters, dummies, kv, body, immutable) {
+                          List<Variable>/*!*/ dummies, QKeyValue kv, Trigger triggers, Expr/*!*/ body)
+      : base(tok, typeParameters, dummies, kv, body) {
       Contract.Requires(tok != null);
       Contract.Requires(typeParameters != null);
       Contract.Requires(dummies != null);
@@ -686,31 +527,26 @@ namespace Microsoft.Boogie {
       Contract.Assert((this is ForallExpr) || (this is ExistsExpr));
 
       Triggers = triggers;
-      SkolemId = GetNextSkolemId();
+      SkolemId = SkolemIds++;
     }
 
     protected override void EmitTriggers(TokenTextWriter stream) {
       //Contract.Requires(stream != null);
-      stream.push();
       for (Trigger tr = this.Triggers; tr != null; tr = tr.Next) {
         tr.Emit(stream);
         stream.Write(" ");
-        stream.sep();
       }
-      stream.pop();
     }
 
-    // if the user says ( forall x :: forall y ::  ... ) and specifies *no* triggers, we transform it to
-    // (forall x, y ::  ... ) which may help the prover to pick trigger terms
-    //
-    // (Note: there used to be a different criterion here, which allowed merging when triggers were specified, which could cause prover errors due to resulting unbound variables in the triggers)
+    // if the user says ( forall x :: forall y :: { f(x,y) } ... ) we transform it to
+    // (forall x, y :: { f(x,y) } ... ) otherwise the prover ignores the trigger
     private void MergeAdjecentQuantifier() {
       QuantifierExpr qbody = Body as QuantifierExpr;
       if (!(qbody != null && (qbody is ForallExpr) == (this is ForallExpr) && Triggers == null)) {
         return;
       }
       qbody.MergeAdjecentQuantifier();
-      if (this.Triggers != null || qbody.Triggers != null) {
+      if (qbody.Triggers == null) {
         return;
       }
       Body = qbody.Body;
@@ -731,7 +567,7 @@ namespace Microsoft.Boogie {
     }
 
     #region never triggers
-    private class NeverTriggerCollector : ReadOnlyVisitor {
+    private class NeverTriggerCollector : StandardVisitor {
       QuantifierExpr/*!*/ parent;
       [ContractInvariantMethod]
       void ObjectInvariant() {
@@ -865,22 +701,13 @@ namespace Microsoft.Boogie {
       }
     }
 
-    public override bool Equals(object obj) {
-      var other = obj as QuantifierExpr;
-      if (other == null) {
-        return false;
-      } else {
-        return this.BinderEquals(obj) && 
-          (!CompareAttributesAndTriggers || object.Equals(Triggers, other.Triggers));
-      }
-    }
   }
 
 
   public class LambdaExpr : BinderExpr {
     public LambdaExpr(IToken/*!*/ tok, List<TypeVariable>/*!*/ typeParameters,
-                      List<Variable>/*!*/ dummies, QKeyValue kv, Expr/*!*/ body, bool immutable=false)
-      : base(tok, typeParameters, dummies, kv, body, immutable) {
+                      List<Variable>/*!*/ dummies, QKeyValue kv, Expr/*!*/ body)
+      : base(tok, typeParameters, dummies, kv, body) {
       Contract.Requires(tok != null);
       Contract.Requires(typeParameters != null);
       Contract.Requires(dummies != null);

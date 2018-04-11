@@ -19,21 +19,16 @@ namespace VC {
     public StratifiedInliningInfo info;
     public int id;
     public List<VCExprVar> interfaceExprVars;
-
-    // boolControlVC (block -> its bool variable)
-    public Dictionary<Block, VCExpr> blockToControlVar;
-    // While using labels (block -> its label)
-    public Dictionary<Absy, string> block2label;
-
     public Dictionary<Block, List<StratifiedCallSite>> callSites;
     public Dictionary<Block, List<StratifiedCallSite>> recordProcCallSites;
     public VCExpr vcexpr;
 
-    // Must-Reach Information
-    Dictionary<Block, VCExprVar> mustReachVar;
-    List<VCExprLetBinding> mustReachBindings;
+    // the following three fields are not being used at the moment
+    public VCExprVar entryExprVar;
+    public Dictionary<Block, Macro> reachMacros;
+    public Dictionary<Block, VCExpr> reachMacroDefinitions;
 
-    public StratifiedVC(StratifiedInliningInfo siInfo, HashSet<string> procCalls) {
+    public StratifiedVC(StratifiedInliningInfo siInfo) {
       info = siInfo;
       info.GenerateVC();
       var vcgen = info.vcgen;
@@ -53,29 +48,29 @@ namespace VC {
       foreach (VCExprVar v in info.privateExprVars) {
         substDict.Add(v, vcgen.CreateNewVar(v.Type));
       }
-      if(info.controlFlowVariable != null)
-          substDict.Add(bet.LookupVariable(info.controlFlowVariable), gen.Integer(BigNum.FromInt(id)));
+      substDict.Add(bet.LookupVariable(info.controlFlowVariable), gen.Integer(BigNum.FromInt(id)));
       VCExprSubstitution subst = new VCExprSubstitution(substDict, new Dictionary<TypeVariable, Microsoft.Boogie.Type>());
       SubstitutingVCExprVisitor substVisitor = new SubstitutingVCExprVisitor(prover.VCExprGen);
       vcexpr = substVisitor.Mutate(vcexpr, subst);
 
-      // For BoolControlVC generation
-      if (info.blockToControlVar != null)
-      {
-          blockToControlVar = new Dictionary<Block, VCExpr>();
-          foreach (var tup in info.blockToControlVar)
-              blockToControlVar.Add(tup.Key, substDict[tup.Value]);
+      var impl = info.impl;
+      reachMacros = new Dictionary<Block, Macro>();
+      reachMacroDefinitions = new Dictionary<Block, VCExpr>();
+      foreach (Block b in impl.Blocks) {
+        reachMacros[b] = vcgen.CreateNewMacro();
+        reachMacroDefinitions[b] = VCExpressionGenerator.False;
       }
-
-      // labels
-      if (info.label2absy != null)
-      {
-          block2label = new Dictionary<Absy, string>();
-          vcexpr = RenameVCExprLabels.Apply(vcexpr, info.vcgen.prover.VCExprGen, info.label2absy, block2label);
+      entryExprVar = vcgen.CreateNewVar(Microsoft.Boogie.Type.Bool);
+      reachMacroDefinitions[impl.Blocks[0]] = entryExprVar;
+      foreach (Block currBlock in impl.Blocks) {
+        GotoCmd gotoCmd = currBlock.TransferCmd as GotoCmd;
+        if (gotoCmd == null) continue;
+        foreach (Block successorBlock in gotoCmd.labelTargets) {
+          VCExpr controlFlowFunctionAppl = gen.ControlFlowFunctionApplication(gen.Integer(BigNum.FromInt(id)), gen.Integer(BigNum.FromInt(currBlock.UniqueId)));
+          VCExpr controlTransferExpr = gen.Eq(controlFlowFunctionAppl, gen.Integer(BigNum.FromInt(successorBlock.UniqueId)));
+          reachMacroDefinitions[successorBlock] = gen.Or(reachMacroDefinitions[successorBlock], gen.And(gen.Function(reachMacros[currBlock]), controlTransferExpr));
+        }
       }
-
-      if(procCalls != null)
-         vcexpr = RemoveProcedureCalls.Apply(vcexpr, info.vcgen.prover.VCExprGen, procCalls);
 
       callSites = new Dictionary<Block, List<StratifiedCallSite>>();
       foreach (Block b in info.callSites.Keys) {
@@ -92,55 +87,6 @@ namespace VC {
           recordProcCallSites[b].Add(new StratifiedCallSite(cs, substVisitor, subst));
         }
       }
-    }
-
-    public VCExpr MustReach(Block block)
-    {
-        Contract.Assert(!CommandLineOptions.Clo.UseLabels);
-
-        // This information is computed lazily
-        if (mustReachBindings == null)
-        {
-            var vcgen = info.vcgen;
-            var gen = vcgen.prover.VCExprGen;
-            var impl = info.impl;
-            mustReachVar = new Dictionary<Block, VCExprVar>();
-            mustReachBindings = new List<VCExprLetBinding>();
-            foreach (Block b in impl.Blocks)
-                mustReachVar[b] = vcgen.CreateNewVar(Bpl.Type.Bool);
-
-            var dag = new Graph<Block>();
-            dag.AddSource(impl.Blocks[0]);
-            foreach (Block b in impl.Blocks)
-            {
-                var gtc = b.TransferCmd as GotoCmd;
-                if (gtc != null)
-                    foreach (Block dest in gtc.labelTargets)
-                        dag.AddEdge(dest, b);
-            }
-            IEnumerable sortedNodes = dag.TopologicalSort();
-
-            foreach (Block currBlock in dag.TopologicalSort())
-            {
-                if (currBlock == impl.Blocks[0])
-                {
-                    mustReachBindings.Add(gen.LetBinding(mustReachVar[currBlock], VCExpressionGenerator.True));
-                    continue;
-                }
-
-                VCExpr expr = VCExpressionGenerator.False;
-                foreach (var pred in dag.Successors(currBlock))
-                {
-                    VCExpr controlFlowFunctionAppl = gen.ControlFlowFunctionApplication(gen.Integer(BigNum.FromInt(id)), gen.Integer(BigNum.FromInt(pred.UniqueId)));
-                    VCExpr controlTransferExpr = gen.Eq(controlFlowFunctionAppl, gen.Integer(BigNum.FromInt(currBlock.UniqueId)));
-                    expr = gen.Or(expr, gen.And(mustReachVar[pred], controlTransferExpr));
-                }
-                mustReachBindings.Add(gen.LetBinding(mustReachVar[currBlock], expr));
-            }
-        }
-
-        Contract.Assert(mustReachVar.ContainsKey(block));
-        return info.vcgen.prover.VCExprGen.Let(mustReachBindings, mustReachVar[block]);
     }
 
     public List<StratifiedCallSite> CallSites {
@@ -166,119 +112,7 @@ namespace VC {
         return ret;
       }
     }
-
-    public override string ToString()
-    {
-        return info.impl.Name;
-    }
   }
-
-  // Rename all labels in a VC to (globally) fresh labels
-  class RenameVCExprLabels : MutatingVCExprVisitor<bool>
-  {
-      Dictionary<int, Absy> label2absy;
-      Dictionary<Absy, string> absy2newlabel;
-      static int counter = 11;
-
-      RenameVCExprLabels(VCExpressionGenerator gen, Dictionary<int, Absy> label2absy, Dictionary<Absy, string> absy2newlabel)
-          : base(gen)
-      {
-          this.label2absy = label2absy;
-          this.absy2newlabel = absy2newlabel;
-      }
-
-      public static VCExpr Apply(VCExpr expr, VCExpressionGenerator gen, Dictionary<int, Absy> label2absy, Dictionary<Absy, string> absy2newlabel)
-      {
-          return (new RenameVCExprLabels(gen, label2absy, absy2newlabel)).Mutate(expr, true);
-      }
-
-      // Finds labels and changes them to a globally unique label:
-      protected override VCExpr/*!*/ UpdateModifiedNode(VCExprNAry/*!*/ originalNode,
-                                                    List<VCExpr/*!*/>/*!*/ newSubExprs,
-                                                    bool changed,
-                                                    bool arg)
-      {
-          Contract.Ensures(Contract.Result<VCExpr>() != null);
-
-          VCExpr ret;
-          if (changed)
-              ret = Gen.Function(originalNode.Op,
-                                 newSubExprs, originalNode.TypeArguments);
-          else
-              ret = originalNode;
-
-          VCExprLabelOp lop = originalNode.Op as VCExprLabelOp;
-          if (lop == null) return ret;
-          if (!(ret is VCExprNAry)) return ret;
-          VCExprNAry retnary = (VCExprNAry)ret;
-
-          // remove the sign
-          var nosign = 0;
-          if (!Int32.TryParse(lop.label.Substring(1), out nosign))
-              return ret;
-
-          if (!label2absy.ContainsKey(nosign))
-              return ret;
-
-          string newLabel = "SI" + counter.ToString();
-          counter++;
-          absy2newlabel[label2absy[nosign]] = newLabel;
-          
-          if (lop.pos)
-          {
-              return Gen.LabelPos(newLabel, retnary[0]);
-          }
-          else
-          {
-              return Gen.LabelNeg(newLabel, retnary[0]);
-          }
-
-      }
-  }
-
-  // Remove the uninterpreted function calls that substitute procedure calls
-  class RemoveProcedureCalls : MutatingVCExprVisitor<bool>
-  {
-      HashSet<string> procNames;
-
-      RemoveProcedureCalls(VCExpressionGenerator gen, HashSet<string> procNames)
-          : base(gen)
-      {
-          this.procNames = procNames;
-      }
-
-      public static VCExpr Apply(VCExpr expr, VCExpressionGenerator gen, HashSet<string> procNames)
-      {
-          return (new RemoveProcedureCalls(gen, procNames)).Mutate(expr, true);
-      }
-
-      // Finds labels and changes them to a globally unique label:
-      protected override VCExpr/*!*/ UpdateModifiedNode(VCExprNAry/*!*/ originalNode,
-                                                    List<VCExpr/*!*/>/*!*/ newSubExprs,
-                                                    bool changed,
-                                                    bool arg)
-      {
-          //Contract.Ensures(Contract.Result<VCExpr>() != null);
-
-          VCExpr ret;
-          if (changed)
-              ret = Gen.Function(originalNode.Op,
-                                 newSubExprs, originalNode.TypeArguments);
-          else
-              ret = originalNode;
-
-          if (!(ret is VCExprNAry)) return ret;
-          VCExprNAry retnary = (VCExprNAry)ret;
-          if (!(retnary.Op is VCExprBoogieFunctionOp))
-              return ret;
-
-          var fcall = (retnary.Op as VCExprBoogieFunctionOp).Func.Name;
-          if (procNames.Contains(fcall))
-              return VCExpressionGenerator.True;
-          return ret;
-      }
-  }
-
 
   public class CallSite {
     public string calleeName;
@@ -286,15 +120,12 @@ namespace VC {
     public Block block;
     public int numInstr;  // for TraceLocation
     public VCExprVar callSiteVar;
-    public QKeyValue Attributes; // attributes on the call cmd
-    public CallSite(string callee, List<VCExpr> interfaceExprs, VCExprVar callSiteVar, Block block, int numInstr, QKeyValue Attributes)
-    {
+    public CallSite(string callee, List<VCExpr> interfaceExprs, VCExprVar callSiteVar, Block block, int numInstr) {
       this.calleeName = callee;
       this.interfaceExprs = interfaceExprs;
       this.callSiteVar = callSiteVar;
       this.block = block;
       this.numInstr = numInstr;
-      this.Attributes = Attributes;
     }
   }
 
@@ -341,13 +172,7 @@ namespace VC {
         }
         scs.interfaceExprs = newInterfaceExprs;
       }
-      //return gen.Implies(callSiteExpr, svc.vcexpr);
-      return svc.vcexpr;
-    }
-
-    public override string ToString()
-    {
-        return callSite.calleeName;
+      return gen.Implies(callSiteExpr, svc.vcexpr);
     }
   }
 
@@ -356,7 +181,7 @@ namespace VC {
     public Implementation impl;
     public Function function;
     public Variable controlFlowVariable;
-    public Cmd exitAssertCmd;
+    public AssertCmd exitAssertCmd;
     public VCExpr vcexpr;
     public List<VCExprVar> interfaceExprVars;
     public List<VCExprVar> privateExprVars;
@@ -365,19 +190,13 @@ namespace VC {
     public Dictionary<Block, List<CallSite>> callSites;
     public Dictionary<Block, List<CallSite>> recordProcCallSites;
     public bool initialized { get; private set; }
-    // Instrumentation to apply after PassiveImpl, but before VCGen
-    Action<Implementation> PassiveImplInstrumentation;
 
-    // boolControlVC (block -> its Bool variable)
-    public Dictionary<Block, VCExprVar> blockToControlVar; 
-
-    public StratifiedInliningInfo(Implementation implementation, StratifiedVCGenBase stratifiedVcGen, Action<Implementation> PassiveImplInstrumentation) {
+    public StratifiedInliningInfo(Implementation implementation, StratifiedVCGenBase stratifiedVcGen) {
       vcgen = stratifiedVcGen;
       impl = implementation;
-      this.PassiveImplInstrumentation = PassiveImplInstrumentation;
 
       List<Variable> functionInterfaceVars = new List<Variable>();
-      foreach (Variable v in vcgen.program.GlobalVariables) {
+      foreach (Variable v in vcgen.program.GlobalVariables()) {
         functionInterfaceVars.Add(new Formal(Token.NoToken, new TypedIdent(Token.NoToken, "", v.TypedIdent.Type), true));
       }
       foreach (Variable v in impl.InParams) {
@@ -395,7 +214,7 @@ namespace VC {
       vcgen.prover.Context.DeclareFunction(function, "");
 
       List<Expr> exprs = new List<Expr>();
-      foreach (Variable v in vcgen.program.GlobalVariables) {
+      foreach (Variable v in vcgen.program.GlobalVariables()) {
         Contract.Assert(v != null);
         exprs.Add(new OldExpr(Token.NoToken, new IdentifierExpr(Token.NoToken, v)));
       }
@@ -419,155 +238,15 @@ namespace VC {
       initialized = false;
     }
 
-    public void GenerateVCBoolControl()
-    {
-        Debug.Assert(!initialized);
-        Debug.Assert(CommandLineOptions.Clo.SIBoolControlVC);
-
-        // fix names for exit variables
-        var outputVariables = new List<Variable>();
-        var assertConjuncts = new List<Expr>();
-        foreach (Variable v in impl.OutParams)
-        {
-            Constant c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, impl.Name + "_" + v.Name, v.TypedIdent.Type));
-            outputVariables.Add(c);
-            Expr eqExpr = Expr.Eq(new IdentifierExpr(Token.NoToken, c), new IdentifierExpr(Token.NoToken, v));
-            assertConjuncts.Add(eqExpr);
-        }
-        foreach (IdentifierExpr e in impl.Proc.Modifies)
-        {
-            if (e.Decl == null) continue;
-            Variable v = e.Decl;
-            Constant c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, impl.Name + "_" + v.Name, v.TypedIdent.Type));
-            outputVariables.Add(c);
-            Expr eqExpr = Expr.Eq(new IdentifierExpr(Token.NoToken, c), new IdentifierExpr(Token.NoToken, v));
-            assertConjuncts.Add(eqExpr);
-        }
-        exitAssertCmd = new AssumeCmd(Token.NoToken, Expr.BinaryTreeAnd(assertConjuncts));
-        (exitAssertCmd as AssumeCmd).Attributes = new QKeyValue(Token.NoToken, "exitAssert", new List<object>(), null);
-
-        // no need for label2absy
-        label2absy = new Dictionary<int, Absy>();
-
-        // Passify
-        Program program = vcgen.program;
-        ProverInterface proverInterface = vcgen.prover;
-        vcgen.ConvertCFG2DAG(impl);
-        vcgen.PassifyImpl(impl, out mvInfo);
-
-        VCExpressionGenerator gen = proverInterface.VCExprGen;
-        var exprGen = proverInterface.Context.ExprGen;
-        var translator = proverInterface.Context.BoogieExprTranslator;
-
-        // add a boolean variable at each call site
-        vcgen.InstrumentCallSites(impl);
-
-        // typecheck
-        var tc = new TypecheckingContext(null);
-        impl.Typecheck(tc);
-
-        ///////////////////
-        // Generate the VC
-        ///////////////////
-
-        // block -> bool variable
-        blockToControlVar = new Dictionary<Block, VCExprVar>();
-        foreach (var b in impl.Blocks)
-            blockToControlVar.Add(b, gen.Variable(b.Label + "_holds", Bpl.Type.Bool));
-
-        vcexpr = VCExpressionGenerator.True;
-        foreach (var b in impl.Blocks)
-        {
-            // conjoin all assume cmds
-            VCExpr c = VCExpressionGenerator.True;
-            foreach (var cmd in b.Cmds)
-            {
-                var acmd = cmd as AssumeCmd;
-                if (acmd == null)
-                {
-                    Debug.Assert(cmd is AssertCmd && (cmd as AssertCmd).Expr is LiteralExpr &&
-                        ((cmd as AssertCmd).Expr as LiteralExpr).IsTrue);
-                    continue;
-                }
-                var expr = translator.Translate(acmd.Expr);
-                // Label the assume if it is a procedure call
-                NAryExpr naryExpr = acmd.Expr as NAryExpr;
-                if (naryExpr != null && naryExpr.Fun is FunctionCall)
-                {
-                    var id = acmd.UniqueId;
-                    label2absy[id] = acmd;
-                    expr = gen.LabelPos(cce.NonNull("si_fcall_" + id.ToString()), expr);
-                }
-
-                c = gen.AndSimp(c, expr);
-            }          
-
-            // block implies a disjunction of successors
-            Debug.Assert(!(b.TransferCmd is ReturnExprCmd), "Not supported");
-            var gc = b.TransferCmd as GotoCmd;
-            if (gc != null)
-            {
-                VCExpr succ = VCExpressionGenerator.False;
-                foreach (var sb in gc.labelTargets)
-                    succ = gen.OrSimp(succ, blockToControlVar[sb]);
-                c = gen.AndSimp(c, succ);
-            }
-            else
-            {
-                // nothing to do
-            }
-            vcexpr = gen.AndSimp(vcexpr, gen.Eq(blockToControlVar[b], c));
-        }
-        // assert start block
-        vcexpr = gen.AndSimp(vcexpr, blockToControlVar[impl.Blocks[0]]);
-
-        //Console.WriteLine("VC of {0}: {1}", impl.Name, vcexpr);
-        // Collect other information
-        callSites = vcgen.CollectCallSites(impl);
-        recordProcCallSites = vcgen.CollectRecordProcedureCallSites(impl);
-
-        // record interface variables
-        privateExprVars = new List<VCExprVar>();
-        foreach (Variable v in impl.LocVars)
-        {
-            privateExprVars.Add(translator.LookupVariable(v));
-        }
-        foreach (Variable v in impl.OutParams)
-        {
-            privateExprVars.Add(translator.LookupVariable(v));
-        }
-        privateExprVars.AddRange(blockToControlVar.Values);
-
-        interfaceExprVars = new List<VCExprVar>();
-        foreach (Variable v in program.GlobalVariables)
-        {
-            interfaceExprVars.Add(translator.LookupVariable(v));
-        }
-        foreach (Variable v in impl.InParams)
-        {
-            interfaceExprVars.Add(translator.LookupVariable(v));
-        }
-        foreach (Variable v in outputVariables)
-        {
-            interfaceExprVars.Add(translator.LookupVariable(v));
-        }
-    }
-
     public void GenerateVC() {
       if (initialized) return;
-      if (CommandLineOptions.Clo.SIBoolControlVC)
-      {
-          GenerateVCBoolControl();
-          initialized = true;
-          return;
-      }
       List<Variable> outputVariables = new List<Variable>();
-      List<Expr> assertConjuncts = new List<Expr>();
+      Expr assertExpr = new LiteralExpr(Token.NoToken, true);
       foreach (Variable v in impl.OutParams) {
         Constant c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, impl.Name + "_" + v.Name, v.TypedIdent.Type));
         outputVariables.Add(c);
         Expr eqExpr = Expr.Eq(new IdentifierExpr(Token.NoToken, c), new IdentifierExpr(Token.NoToken, v));
-        assertConjuncts.Add(eqExpr);
+        assertExpr = Expr.And(assertExpr, eqExpr);
       }
       foreach (IdentifierExpr e in impl.Proc.Modifies) {
         if (e.Decl == null) continue;
@@ -575,9 +254,9 @@ namespace VC {
         Constant c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, impl.Name + "_" + v.Name, v.TypedIdent.Type));
         outputVariables.Add(c);
         Expr eqExpr = Expr.Eq(new IdentifierExpr(Token.NoToken, c), new IdentifierExpr(Token.NoToken, v));
-        assertConjuncts.Add(eqExpr);
+        assertExpr = Expr.And(assertExpr, eqExpr);
       }
-      exitAssertCmd = new AssertCmd(Token.NoToken, Expr.Not(Expr.BinaryTreeAnd(assertConjuncts)));
+      exitAssertCmd = new AssertCmd(Token.NoToken, Expr.Not(assertExpr));
 
       Program program = vcgen.program;
       ProverInterface proverInterface = vcgen.prover;
@@ -592,27 +271,21 @@ namespace VC {
       if (!CommandLineOptions.Clo.UseLabels) {
         controlFlowVariable = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, "@cfc", Microsoft.Boogie.Type.Int));
         controlFlowVariableExpr = translator.LookupVariable(controlFlowVariable);
+        vcgen.InstrumentCallSites(impl);
       }
-
-      vcgen.InstrumentCallSites(impl);
-
-      if (PassiveImplInstrumentation != null)
-          PassiveImplInstrumentation(impl);
-
+      
       label2absy = new Dictionary<int, Absy>();
       VCGen.CodeExprConversionClosure cc = new VCGen.CodeExprConversionClosure(label2absy, proverInterface.Context);
       translator.SetCodeExprConverter(cc.CodeExprToVerificationCondition); 
       vcexpr = gen.Not(vcgen.GenerateVCAux(impl, controlFlowVariableExpr, label2absy, proverInterface.Context));
-
-      if (controlFlowVariableExpr != null)
-      {
-          VCExpr controlFlowFunctionAppl = exprGen.ControlFlowFunctionApplication(controlFlowVariableExpr, exprGen.Integer(BigNum.ZERO));
-          VCExpr eqExpr = exprGen.Eq(controlFlowFunctionAppl, exprGen.Integer(BigNum.FromInt(impl.Blocks[0].UniqueId)));
-          vcexpr = exprGen.And(eqExpr, vcexpr);
+      
+      if (controlFlowVariableExpr != null) {
+        VCExpr controlFlowFunctionAppl = exprGen.ControlFlowFunctionApplication(controlFlowVariableExpr, exprGen.Integer(BigNum.ZERO));
+        VCExpr eqExpr = exprGen.Eq(controlFlowFunctionAppl, exprGen.Integer(BigNum.FromInt(impl.Blocks[0].UniqueId)));
+        vcexpr = exprGen.And(eqExpr, vcexpr);
+        callSites = vcgen.CollectCallSites(impl);
+        recordProcCallSites = vcgen.CollectRecordProcedureCallSites(impl);
       }
-
-      callSites = vcgen.CollectCallSites(impl);
-      recordProcCallSites = vcgen.CollectRecordProcedureCallSites(impl);
 
       privateExprVars = new List<VCExprVar>();
       foreach (Variable v in impl.LocVars) {
@@ -623,7 +296,7 @@ namespace VC {
       }
 
       interfaceExprVars = new List<VCExprVar>();
-      foreach (Variable v in program.GlobalVariables) {
+      foreach (Variable v in program.GlobalVariables()) {
         interfaceExprVars.Add(translator.LookupVariable(v));
       }
       foreach (Variable v in impl.InParams) {
@@ -639,22 +312,25 @@ namespace VC {
 
   public abstract class StratifiedVCGenBase : VCGen {
     public readonly static string recordProcName = "boogie_si_record";
-    public readonly static string callSiteVarAttr = "callSiteVar";
     public Dictionary<string, StratifiedInliningInfo> implName2StratifiedInliningInfo;
     public ProverInterface prover;
 
-    public StratifiedVCGenBase(Program program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers, Action<Implementation> PassiveImplInstrumentation)
+    public StratifiedVCGenBase(Program program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers)
       : base(program, logFilePath, appendLogFile, checkers) {
       implName2StratifiedInliningInfo = new Dictionary<string, StratifiedInliningInfo>();
       prover = ProverInterface.CreateProver(program, logFilePath, appendLogFile, CommandLineOptions.Clo.ProverKillTime);
-      foreach (var impl in program.Implementations) {
-        implName2StratifiedInliningInfo[impl.Name] = new StratifiedInliningInfo(impl, this, PassiveImplInstrumentation);
+      foreach (Declaration decl in program.TopLevelDeclarations) {
+        Implementation impl = decl as Implementation;
+        if (impl == null) continue;
+        implName2StratifiedInliningInfo[impl.Name] = new StratifiedInliningInfo(impl, this);
       }
       GenerateRecordFunctions();
     }
 
     private void GenerateRecordFunctions() {
-      foreach (var proc in program.Procedures) {
+      foreach (var decl in program.TopLevelDeclarations) {
+        var proc = decl as Procedure;
+        if (proc == null) continue;
         if (!proc.Name.StartsWith(recordProcName)) continue;
         Contract.Assert(proc.InParams.Count == 1);
 
@@ -698,11 +374,9 @@ namespace VC {
           NAryExpr naryExpr = assumeCmd.Expr as NAryExpr;
           if (naryExpr == null) continue;
           if (!implName2StratifiedInliningInfo.ContainsKey(naryExpr.Fun.FunctionName)) continue;
-          Variable callSiteVar = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, "SICS" + callSiteId, Microsoft.Boogie.Type.Bool));
+          Variable callSiteVar = new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken, "StratifiedInliningCallSite" + callSiteId, Microsoft.Boogie.Type.Bool));
           implementation.LocVars.Add(callSiteVar);
-          var toInsert = new AssumeCmd(Token.NoToken, new IdentifierExpr(Token.NoToken, callSiteVar),
-              new QKeyValue(Token.NoToken, callSiteVarAttr, new List<object>(), null));
-          newCmds.Add(toInsert);
+          newCmds.Add(new AssumeCmd(Token.NoToken, new IdentifierExpr(Token.NoToken, callSiteVar)));
           callSiteId++;
         }
         block.Cmds = newCmds;
@@ -727,7 +401,7 @@ namespace VC {
           i++;
           AssumeCmd callSiteAssumeCmd = (AssumeCmd)block.Cmds[i];
           IdentifierExpr iexpr = (IdentifierExpr) callSiteAssumeCmd.Expr;
-          CallSite cs = new CallSite(naryExpr.Fun.FunctionName, interfaceExprs, prover.Context.BoogieExprTranslator.LookupVariable(iexpr.Decl), block, instr, assumeCmd.Attributes);
+          CallSite cs = new CallSite(naryExpr.Fun.FunctionName, interfaceExprs, prover.Context.BoogieExprTranslator.LookupVariable(iexpr.Decl), block, instr);
           if (!callSites.ContainsKey(block))
             callSites[block] = new List<CallSite>();
           callSites[block].Add(cs);
@@ -749,7 +423,7 @@ namespace VC {
           foreach (Expr e in naryExpr.Args) {
             interfaceExprs.Add(prover.Context.BoogieExprTranslator.Translate(e));
           }
-          CallSite cs = new CallSite(naryExpr.Fun.FunctionName, interfaceExprs, null, block, i, assumeCmd.Attributes);
+          CallSite cs = new CallSite(naryExpr.Fun.FunctionName, interfaceExprs, null, block, i);
           if (!callSites.ContainsKey(block))
             callSites[block] = new List<CallSite>();
           callSites[block].Add(cs);
@@ -760,13 +434,13 @@ namespace VC {
 
     private int macroCountForStratifiedInlining = 0;
     public Macro CreateNewMacro() {
-      string newName = "SIMacro@" + macroCountForStratifiedInlining.ToString();
+      string newName = "StratifiedInliningMacro@" + macroCountForStratifiedInlining.ToString();
       macroCountForStratifiedInlining++;
       return new Macro(Token.NoToken, newName, new List<Variable>(), new Formal(Token.NoToken, new TypedIdent(Token.NoToken, "", Microsoft.Boogie.Type.Bool), false));
     }
     private int varCountForStratifiedInlining = 0;
     public VCExprVar CreateNewVar(Microsoft.Boogie.Type type) {
-      string newName = "SIV@" + varCountForStratifiedInlining.ToString();
+      string newName = "StratifiedInliningVar@" + varCountForStratifiedInlining.ToString();
       varCountForStratifiedInlining++;
       Constant newVar = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, newName, type));
       prover.Context.DeclareConstant(newVar, false, null);
@@ -780,8 +454,9 @@ namespace VC {
     // Used inside PassifyImpl
     protected override void addExitAssert(string implName, Block exitBlock) {
       if (implName2StratifiedInliningInfo != null && implName2StratifiedInliningInfo.ContainsKey(implName)) {
-        var exitAssertCmd = implName2StratifiedInliningInfo[implName].exitAssertCmd;
-        if(exitAssertCmd != null) exitBlock.Cmds.Add(exitAssertCmd);
+        AssertCmd exitAssertCmd = implName2StratifiedInliningInfo[implName].exitAssertCmd;
+        Contract.Assert(exitAssertCmd != null);
+        exitBlock.Cmds.Add(exitAssertCmd);
       }
     }
 
@@ -831,16 +506,22 @@ namespace VC {
 
   public class StratifiedVCGen : StratifiedVCGenBase {
     public bool PersistCallTree;
-    public static HashSet<string> callTree = null;
+    public static Dictionary<string, int> callTree = null;
     public int numInlined = 0;
-    public int vcsize = 0;
+    private bool useSummary;
+    private SummaryComputation summaryComputation;
     private HashSet<string> procsThatReachedRecBound;
-    private Dictionary<string, int> extraRecBound;
+    public HashSet<string> procsToSkip;
+    public Dictionary<string, int> extraRecBound;
 
-    public StratifiedVCGen(bool usePrevCallTree, HashSet<string> prevCallTree, 
+    public StratifiedVCGen(bool usePrevCallTree, Dictionary<string, int> prevCallTree, 
+                           HashSet<string> procsToSkip, Dictionary<string, int> extraRecBound,
                            Program program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers) 
     : this(program, logFilePath, appendLogFile, checkers)
-    {          
+    {
+      this.procsToSkip = new HashSet<string>(procsToSkip);
+      this.extraRecBound = new Dictionary<string, int>(extraRecBound);
+
       if (usePrevCallTree) {
         callTree = prevCallTree;
         PersistCallTree = true;
@@ -851,24 +532,242 @@ namespace VC {
     }
 
     public StratifiedVCGen(Program program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers)
-      : base(program, logFilePath, appendLogFile, checkers, null) {
+      : base(program, logFilePath, appendLogFile, checkers) {
       PersistCallTree = false;
+      useSummary = false;
       procsThatReachedRecBound = new HashSet<string>();
-
+      procsToSkip = new HashSet<string>();
       extraRecBound = new Dictionary<string, int>();
-      program.TopLevelDeclarations.OfType<Implementation>()
-          .Iter(impl =>
-          {
-              var b = QKeyValue.FindIntAttribute(impl.Attributes, "SIextraRecBound", -1);
-              if (b != -1) extraRecBound.Add(impl.Name, b);
-          });
     }
 
+    // Is this procedure to be "skipped" 
+    // Currently this is experimental
+    public bool isSkipped(string procName) {
+      return procsToSkip.Contains(procName);
+    }
+    public bool isSkipped(int candidate, FCallHandler calls) {
+      return isSkipped(calls.getProc(candidate));
+    }
     // Extra rec bound for procedures
     public int GetExtraRecBound(string procName) {
       if (!extraRecBound.ContainsKey(procName))
         return 0;
       else return extraRecBound[procName];
+    }
+
+    public class SummaryComputation {
+      // The verification state
+      VerificationState vState;
+      // The call tree
+      FCallHandler calls;
+      // Fully-inlined guys we have already queried
+      HashSet<string> fullyInlinedCache;
+
+      // The summary: boolean guards that are true
+      HashSet<VCExprVar> trueSummaryConst;
+      HashSet<VCExprVar> trueSummaryConstUndeBound;
+
+      // Compute summaries under recursion bound or not?
+      bool ComputeUnderBound;
+
+      public SummaryComputation(VerificationState vState, bool ComputeUnderBound) {
+        this.vState = vState;
+        this.calls = vState.calls;
+        this.fullyInlinedCache = new HashSet<string>();
+        this.trueSummaryConst = new HashSet<VCExprVar>();
+        this.trueSummaryConstUndeBound = new HashSet<VCExprVar>();
+        this.ComputeUnderBound = false;
+      }
+
+      public void boundChanged() {
+        if (ComputeUnderBound) {
+          var s = "";
+          trueSummaryConstUndeBound.Iter(v => s = s + v.ToString() + ",");
+          Console.WriteLine("Clearing summaries: {0}", s);
+
+          // start from scratch
+          trueSummaryConst.ExceptWith(trueSummaryConstUndeBound);
+          trueSummaryConstUndeBound = new HashSet<VCExprVar>();
+        }
+      }
+
+      public void compute(HashSet<int> goodCandidates, int bound) {
+        var start = DateTime.UtcNow;
+        goodCandidates = calls.currCandidates;
+
+        var found = 0;
+
+        // Find all nodes that have children only in goodCandidates
+        var overApproxNodes = FindNodes(calls.candidateParent, calls.currCandidates, goodCandidates);
+        overApproxNodes.IntersectWith(calls.summaryCandidates.Keys);
+
+        var roots = FindTopMostAncestors(calls.candidateParent, overApproxNodes);
+        var prover2 = vState.checker2.prover;
+        var reporter2 = vState.checker2.reporter;
+
+        prover2.Push();
+
+        // candidates to block
+        var block = new HashSet<int>();
+        var usesBound = new HashSet<int>();
+        if (ComputeUnderBound) {
+          calls.currCandidates.Iter(id => { if (calls.getRecursionBound(id) > bound) block.Add(id); });
+          foreach (var id in block) {
+            prover2.Assert(calls.getFalseExpr(id), true);
+            var curr = id;
+            usesBound.Add(id);
+            while (curr != 0) {
+              curr = calls.candidateParent[curr];
+              usesBound.Add(curr);
+            }
+          }
+
+        }
+
+        // Iterate over the roots
+        foreach (var id in roots) {
+          // inline procedures in post order
+          var post = getPostOrder(calls.candidateParent, id);
+
+          vState.checker.prover.Push();
+          foreach (var cid in post) {
+            if (goodCandidates.Contains(cid)) continue;
+
+            prover2.Assert(calls.id2VC[cid], true);
+            if (!overApproxNodes.Contains(cid)) continue;
+            prover2.Assert(calls.id2ControlVar[cid], true);
+
+            foreach (var tup in calls.summaryCandidates[cid]) {
+              if (trueSummaryConst.Contains(tup.Item1)) continue;
+
+              //Console.WriteLine("Going to try ({0} ==> {1}) on {2}", tup.Item1, tup.Item2, id);
+              //Console.WriteLine("Call expr: {0}", calls.id2Candidate[id]);
+
+              // It is OK to assume the summary while trying to prove it
+              var summary = getSummary(tup.Item1);
+
+              prover2.Push();
+              prover2.Assert(summary, true);
+              prover2.Assert(prover2.VCExprGen.Not(tup.Item2), true);
+              prover2.Check();
+              var outcome = ConditionGeneration.ProverInterfaceOutcomeToConditionGenerationOutcome(prover2.CheckOutcomeCore(reporter2));
+
+              prover2.Pop();
+              if (outcome == Outcome.Correct) {
+                //Console.WriteLine("Found summary: {0}", tup.Item1);
+                found++;
+                trueSummaryConst.Add(tup.Item1);
+                if (usesBound.Contains(cid)) trueSummaryConstUndeBound.Add(tup.Item1);
+              }
+            }
+          }
+          prover2.Pop();
+        }
+        prover2.Pop();
+
+        var end = DateTime.UtcNow;
+        if (CommandLineOptions.Clo.StratifiedInliningVerbose > 0) {
+          Console.WriteLine(">> Summary computation took {0} sec and inferred {1} of {2} contracts",
+              (end - start).TotalSeconds, found, calls.allSummaryConst.Count);
+        }
+
+      }
+
+
+      public VCExpr getSummary() {
+        return getSummary(new HashSet<VCExprVar>());
+      }
+
+      public VCExpr getSummary(params VCExprVar[] p) {
+        var s = new HashSet<VCExprVar>();
+        p.Iter(v => s.Add(v));
+        return getSummary(s);
+      }
+
+      public VCExpr getSummary(HashSet<VCExprVar> extraToSet) {
+        if (calls.allSummaryConst.Count == 0) return null;
+        // TODO: does it matter which checker we use here?
+        var Gen = vState.checker.prover.VCExprGen;
+
+        var ret = VCExpressionGenerator.True;
+        foreach (var c in calls.allSummaryConst) {
+          if (trueSummaryConst.Contains(c) || extraToSet.Contains(c)) {
+            ret = Gen.And(ret, c);
+          }
+          else {
+            ret = Gen.And(ret, Gen.Not(c));
+          }
+        }
+        return ret;
+      }
+
+      // Return a subset of nodes such that all other nodes are their decendent
+      private HashSet<int> FindTopMostAncestors(Dictionary<int, int> parents, HashSet<int> nodes) {
+        var ret = new HashSet<int>();
+        //var ancestorFound = new HashSet<int>();
+        foreach (var n in nodes) {
+          var ancestor = n;
+          var curr = n;
+          while (curr != 0) {
+            curr = parents[curr];
+            if (nodes.Contains(curr)) ancestor = curr;
+          }
+          ret.Add(ancestor);
+        }
+        return ret;
+      }
+
+      // Returns the set of candidates whose child leaves are all "good". Remove fully inlined ones.
+      HashSet<int> FindNodes(Dictionary<int, int> parents, HashSet<int> allLeaves,
+          HashSet<int> goodLeaves) {
+        var ret = new HashSet<int>();
+        var leaves = new Dictionary<int, HashSet<int>>();
+        leaves.Add(0, new HashSet<int>());
+        parents.Keys.Iter(n => leaves.Add(n, new HashSet<int>()));
+        allLeaves.Iter(l => leaves[l].Add(l));
+
+        foreach (var l in allLeaves) {
+          var curr = l;
+          leaves[curr].Add(l);
+          while (parents.ContainsKey(curr)) {
+            curr = parents[curr];
+            leaves[curr].Add(l);
+          }
+        }
+
+        foreach (var kvp in leaves) {
+          if (kvp.Value.Count == 0) {
+            var proc = calls.getProc(kvp.Key);
+            if (fullyInlinedCache.Contains(proc)) continue;
+            else {
+              ret.Add(kvp.Key);
+              fullyInlinedCache.Add(proc);
+            }
+          }
+
+          if (kvp.Value.IsSubsetOf(goodLeaves)) {
+            ret.Add(kvp.Key);
+          }
+        }
+
+        return ret;
+      }
+
+
+      // returns children of root in post order
+      static List<int> getPostOrder(Dictionary<int, int> parents, int root) {
+        var children = new Dictionary<int, HashSet<int>>();
+        foreach (var id in parents.Keys) children.Add(id, new HashSet<int>());
+        children.Add(0, new HashSet<int>());
+        foreach (var kvp in parents) children[kvp.Value].Add(kvp.Key);
+        return getPostOrder(children, root);
+      }
+      static List<int> getPostOrder(Dictionary<int, HashSet<int>> children, int root) {
+        var ret = new List<int>();
+        foreach (var ch in children[root]) ret.AddRange(getPostOrder(children, ch));
+        ret.Add(root);
+        return ret;
+      }
     }
 
     public class ApiChecker {
@@ -922,6 +821,9 @@ namespace VC {
       public int vcSize;
       public int expansionCount;
 
+      // For making summary queries on the side
+      public ApiChecker checker2;
+
       public VerificationState(VCExpr vcMain, FCallHandler calls, ProverInterface prover, ProverInterface.ErrorHandler reporter) {
         prover.Assert(vcMain, true);
         this.calls = calls;
@@ -929,17 +831,11 @@ namespace VC {
         vcSize = 0;
         expansionCount = 0;
       }
-    }
-
-    class FindLeastOORException : Exception
-    {
-        public Outcome outcome;
-
-        public FindLeastOORException(string msg, Outcome outcome)
-            : base(msg)
-        {
-            this.outcome = outcome;
-        }
+      public VerificationState(VCExpr vcMain, FCallHandler calls, ProverInterface prover, ProverInterface.ErrorHandler reporter,
+                               ProverInterface prover2, ProverInterface.ErrorHandler reporter2)
+        : this(vcMain, calls, prover, reporter) {
+        this.checker2 = new ApiChecker(prover2, reporter2);
+      }
     }
 
     public override Outcome FindLeastToVerify(Implementation impl, ref HashSet<string> allBoolVars) {
@@ -970,58 +866,47 @@ namespace VC {
       calls.setCurrProcAsMain();
       vcMain = calls.Mutate(vcMain, true);
 
-      try
-      {
+      // Put all of the necessary state into one object
+      var vState = new VerificationState(vcMain, calls, prover, new EmptyErrorHandler());
 
-          // Put all of the necessary state into one object
-          var vState = new VerificationState(vcMain, calls, prover, new EmptyErrorHandler());
+      // We'll restore the original state of the theorem prover at the end
+      // of this procedure
+      vState.checker.prover.Push();
 
-          // We'll restore the original state of the theorem prover at the end
-          // of this procedure
-          vState.checker.prover.Push();
+      // Do eager inlining
+      while (calls.currCandidates.Count > 0) {
+        List<int> toExpand = new List<int>();
 
-          // Do eager inlining
-          while (calls.currCandidates.Count > 0)
-          {
-              List<int> toExpand = new List<int>();
-
-              foreach (int id in calls.currCandidates)
-              {
-                  Debug.Assert(calls.getRecursionBound(id) <= 1, "Recursion not supported");
-                  toExpand.Add(id);
-              }
-              DoExpansion(toExpand, vState);
-          }
-
-          // Find all the boolean constants
-          var allConsts = new HashSet<VCExprVar>();
-          foreach (var constant in program.Constants)
-          {
-              if (!allBoolVars.Contains(constant.Name)) continue;
-              var v = prover.Context.BoogieExprTranslator.LookupVariable(constant);
-              allConsts.Add(v);
-          }
-
-          // Now, lets start the algo
-          var min = refinementLoop(vState.checker, new HashSet<VCExprVar>(), allConsts, allConsts);
-
-          var ret = new HashSet<string>();
-          foreach (var v in min)
-          {
-              //Console.WriteLine(v.Name);
-              ret.Add(v.Name);
-          }
-          allBoolVars = ret;
-
-          vState.checker.prover.Pop();
-
-          return Outcome.Correct;
+        foreach (int id in calls.currCandidates) {
+          Debug.Assert(calls.getRecursionBound(id) <= 1, "Recursion not supported");
+          toExpand.Add(id);
+        }
+        DoExpansion(toExpand, vState);
       }
-      catch (FindLeastOORException e)
-      {
-          Console.WriteLine("Exception in FindLeastToVerify: {0}, {1}", e.Message, e.outcome);
-          return e.outcome;
+
+      // Find all the boolean constants
+      var allConsts = new HashSet<VCExprVar>();
+      foreach (var decl in program.TopLevelDeclarations) {
+        var constant = decl as Constant;
+        if (constant == null) continue;
+        if (!allBoolVars.Contains(constant.Name)) continue;
+        var v = prover.Context.BoogieExprTranslator.LookupVariable(constant);
+        allConsts.Add(v);
       }
+
+      // Now, lets start the algo
+      var min = refinementLoop(vState.checker, new HashSet<VCExprVar>(), allConsts, allConsts);
+
+      var ret = new HashSet<string>();
+      foreach (var v in min) {
+        //Console.WriteLine(v.Name);
+        ret.Add(v.Name);
+      }
+      allBoolVars = ret;
+
+      vState.checker.prover.Pop();
+
+      return Outcome.Correct;
     }
 
     private HashSet<VCExprVar> refinementLoop(ApiChecker apiChecker, HashSet<VCExprVar> trackedVars, HashSet<VCExprVar> trackedVarsUpperBound, HashSet<VCExprVar> allVars) {
@@ -1091,10 +976,7 @@ namespace VC {
       }
 
       var o = apiChecker.CheckAssumptions(assumptions);
-      if (o != Outcome.Correct && o != Outcome.Errors)
-      {
-          throw new FindLeastOORException("OOR", o);
-      }
+      Debug.Assert(o == Outcome.Correct || o == Outcome.Errors);
       //Console.WriteLine("Result = " + o.ToString());
       prover.LogComment("FindLeast: Query End");
 
@@ -1138,6 +1020,26 @@ namespace VC {
 
     public override Outcome VerifyImplementation(Implementation/*!*/ impl, VerifierCallback/*!*/ callback) {
       Debug.Assert(QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint"));
+      Debug.Assert(this.program == program);
+
+      var computeUnderBound = true;
+
+      #region stratified inlining options
+      switch (CommandLineOptions.Clo.StratifiedInliningOption) {
+        case 1:
+          useSummary = true;
+          break;
+        case 2:
+          useSummary = true;
+          computeUnderBound = false;
+          break;
+      }
+      #endregion
+
+      ProverInterface prover2 = null;
+      if (useSummary) {
+        prover2 = ProverInterface.CreateProver(program, "prover2.txt", true, CommandLineOptions.Clo.ProverKillTime);
+      }
 
       // Record current time
       var startTime = DateTime.UtcNow;
@@ -1164,20 +1066,20 @@ namespace VC {
       reporter.SetCandidateHandler(calls);
       calls.id2VC.Add(0, vc);
       calls.extraRecursion = extraRecBound;
-      if (CommandLineOptions.Clo.SIBoolControlVC)
-      {
-          calls.candiate2block2controlVar.Add(0, new Dictionary<Block, VCExpr>());
-          implName2StratifiedInliningInfo[impl.Name].blockToControlVar.Iter(tup =>
-              calls.candiate2block2controlVar[0].Add(tup.Key, tup.Value));
-      }
+
+      // Identify summary candidates: Match ensure clauses with the appropriate call site
+      if (useSummary) calls.matchSummaries();
 
       // We'll restore the original state of the theorem prover at the end
       // of this procedure
       prover.Push();
 
       // Put all of the necessary state into one object
-      var vState = new VerificationState(vc, calls, prover, reporter);
+      var vState = new VerificationState(vc, calls, prover, reporter, prover2, new EmptyErrorHandler());
       vState.vcSize += SizeComputingVisitor.ComputeSize(vc);
+
+      if (useSummary) summaryComputation = new SummaryComputation(vState, computeUnderBound);
+
 
       Outcome ret = Outcome.ReachedBound;
 
@@ -1200,7 +1102,7 @@ namespace VC {
         while (expand) {
           List<int> toExpand = new List<int>();
           foreach (int id in calls.currCandidates) {
-            if (callTree.Contains(calls.getPersistentId(id))) {
+            if (callTree.ContainsKey(calls.getPersistentId(id))) {
               toExpand.Add(id);
             }
           }
@@ -1212,7 +1114,7 @@ namespace VC {
       }
       #endregion
 
-      if (CommandLineOptions.Clo.StratifiedInliningVerbose > 1) {
+      if (CommandLineOptions.Clo.StratifiedInliningVerbose > 0) {
         Console.WriteLine(">> SI: Size of VC after eager inlining: {0}", vState.vcSize);
       }
 
@@ -1253,9 +1155,23 @@ namespace VC {
               break;
           }
 
+          VCExpr summary = null;
+          if (useSummary) summary = summaryComputation.getSummary();
+
+          if (useSummary && summary != null)
+          {
+              vState.checker.prover.Push();
+              vState.checker.prover.Assert(summary, true);
+          }
+
           // Stratified Step
           ret = stratifiedStep(bound, vState, block);
           iters++;
+
+          if (useSummary && summary != null)
+          {
+              vState.checker.prover.Pop();
+          }
 
           // Sorry, out of luck (time/memory)
           if (ret == Outcome.Inconclusive || ret == Outcome.OutOfMemory || ret == Outcome.TimedOut)
@@ -1278,6 +1194,7 @@ namespace VC {
               }
               else
               {
+                  Contract.Assert(useSummary);
                   // reset blocked and continue loop
                   block.Clear();
               }
@@ -1286,11 +1203,9 @@ namespace VC {
           {
               if (block.Count == 0)
               {
-                  if (CommandLineOptions.Clo.StratifiedInliningVerbose > 0)
-                      Console.WriteLine(">> SI: Exhausted Bound {0}", bound);
-
                   // Increment bound
                   bound++;
+                  if (useSummary) summaryComputation.boundChanged();
 
                   if (bound > CommandLineOptions.Clo.RecursionBound)
                   {
@@ -1300,6 +1215,7 @@ namespace VC {
               }
               else
               {
+                  Contract.Assert(useSummary);
                   // reset blocked and continue loop
                   block.Clear();
               }
@@ -1309,16 +1225,29 @@ namespace VC {
               // Do inlining
               Debug.Assert(ret == Outcome.Errors && !reporter.underapproximationMode);
               Contract.Assert(reporter.candidatesToExpand.Count != 0);
+              if (useSummary)
+              {
+                  // compute candidates to block  
+                  block = new HashSet<int>(calls.currCandidates);
+                  block.ExceptWith(reporter.candidatesToExpand);
+              }
 
               #region expand call tree
-              if (CommandLineOptions.Clo.StratifiedInliningVerbose > 1)
+              if (CommandLineOptions.Clo.StratifiedInliningVerbose > 0)
               {
                   Console.Write(">> SI Inlining: ");
                   reporter.candidatesToExpand
                       .Select(c => calls.getProc(c))
-                      .Iter(c =>  Console.Write("{0} ", c));
+                      .Iter(c => { if (!isSkipped(c)) Console.Write("{0} ", c); });
 
                   Console.WriteLine();
+                  Console.Write(">> SI Skipping: ");
+                  reporter.candidatesToExpand
+                      .Select(c => calls.getProc(c))
+                      .Iter(c => { if (isSkipped(c)) Console.Write("{0} ", c); });
+
+                  Console.WriteLine();
+
               }
 
               // Expand and try again
@@ -1334,34 +1263,32 @@ namespace VC {
       // this call to VerifyImplementation
       vState.checker.prover.Pop();
 
-      if (CommandLineOptions.Clo.StratifiedInliningVerbose > 1) {
+      if (CommandLineOptions.Clo.StratifiedInliningVerbose > 0) {
         Console.WriteLine(">> SI: Expansions performed: {0}", vState.expansionCount);
         Console.WriteLine(">> SI: Candidates left: {0}", calls.currCandidates.Count);
+        Console.WriteLine(">> SI: Candidates skipped: {0}", calls.currCandidates.Where(i => isSkipped(i, calls)).Count());
         Console.WriteLine(">> SI: VC Size: {0}", vState.vcSize);
       }
 
-      vcsize = vState.vcSize;
       numInlined = (calls.candidateParent.Keys.Count + 1) - (calls.currCandidates.Count);
 
       var rbound = "Procs that reached bound: ";
       foreach (var s in procsThatReachedRecBound) rbound += "  " + s;
       if (ret == Outcome.ReachedBound) Helpers.ExtraTraceInformation(rbound);
-      if (CommandLineOptions.Clo.StackDepthBound > 0 && ret == Outcome.Correct) ret = Outcome.ReachedBound;
 
       // Store current call tree
       if (PersistCallTree && (ret == Outcome.Correct || ret == Outcome.Errors || ret == Outcome.ReachedBound)) {
-        callTree = new HashSet<string>();
+        callTree = new Dictionary<string, int>();
         //var persistentNodes = new HashSet<int>(calls.candidateParent.Values);
         var persistentNodes = new HashSet<int>(calls.candidateParent.Keys);
         persistentNodes.Add(0);
         persistentNodes.ExceptWith(calls.currCandidates);
 
         foreach (var id in persistentNodes) {
-          var pid = calls.getPersistentId(id);
-          Debug.Assert(!callTree.Contains(pid));
-          callTree.Add(pid);
+          callTree.Add(calls.getPersistentId(id), 0);
         }
       }
+      if (prover2 != null) prover2.Close();
       return ret;
     }
 
@@ -1377,6 +1304,7 @@ namespace VC {
       List<VCExpr> assumptions = new List<VCExpr>();
 
       foreach (int id in calls.currCandidates) {
+        if (!isSkipped(id, calls))
           assumptions.Add(calls.getFalseExpr(id));
       }
       Outcome ret = checker.CheckAssumptions(assumptions);
@@ -1410,14 +1338,15 @@ namespace VC {
       procsThatReachedRecBound.Clear();
 
       foreach (int id in calls.currCandidates) {
+        if (isSkipped(id, calls)) continue;
 
         int idBound = calls.getRecursionBound(id);
-        int sd = calls.getStackDepth(id);
-        if (idBound <= bound && (CommandLineOptions.Clo.StackDepthBound == 0 || sd <= CommandLineOptions.Clo.StackDepthBound)) {
+        if (idBound <= bound) {
           if (idBound > 1)
             softAssumptions.Add(calls.getFalseExpr(id));
 
           if (block.Contains(id)) {
+            Contract.Assert(useSummary);
             assumptions.Add(calls.getFalseExpr(id));
             allTrue = false;
           }
@@ -1455,6 +1384,13 @@ namespace VC {
           return ret;
         }
 
+        if (useSummary) {
+          // Find the set of candidates with valid over-approximations
+          var assumeTrueCandidates = new HashSet<int>(vState.calls.currCandidates);
+          assumeTrueCandidates.ExceptWith(block);
+          summaryComputation.compute(assumeTrueCandidates, bound);
+        }
+
         // Nothing more can be done with current recursion bound. 
         return Outcome.ReachedBound;
       }
@@ -1475,6 +1411,9 @@ namespace VC {
       Contract.Requires(vState.calls != null);
       Contract.Requires(vState.checker.prover != null);
       Contract.EnsuresOnThrow<UnexpectedProverOutputException>(true);
+
+      // Skipped calls don't get inlined
+      candidates = candidates.FindAll(id => !isSkipped(id, vState.calls));
 
       vState.expansionCount += candidates.Count;
 
@@ -1515,16 +1454,6 @@ namespace VC {
           prover.Context.DeclareConstant(new Constant(Token.NoToken, new TypedIdent(Token.NoToken, newName, v.Type)), false, null);
           substExistsDict.Add(v, prover.VCExprGen.Variable(newName, v.Type));
         }
-        if (CommandLineOptions.Clo.SIBoolControlVC)
-        {
-            // record the mapping for control booleans (for tracing the path later)
-            calls.candiate2block2controlVar[id] = new Dictionary<Block, VCExpr>();
-            foreach (var tup in info.blockToControlVar)
-            {
-                calls.candiate2block2controlVar[id].Add(tup.Key,
-                    substExistsDict[tup.Value]);
-            }
-        }
         if (CommandLineOptions.Clo.ModelViewFile != null) {
           SaveSubstitution(vState, id, substForallDict, substExistsDict);
         }
@@ -1543,6 +1472,7 @@ namespace VC {
         calls.currInlineCount = id;
         calls.setCurrProc(procName);
         expansion = calls.Mutate(expansion, true);
+        if (useSummary) calls.matchSummaries();
 
         //expansion = checker.VCExprGen.Eq(calls.id2ControlVar[id], expansion);
         expansion = prover.VCExprGen.Implies(calls.id2ControlVar[id], expansion);
@@ -1606,8 +1536,6 @@ namespace VC {
       public Dictionary<int, VCExprVar/*!*/>/*!*/ id2ControlVar;
       public Dictionary<int, VCExpr> id2VC;
       public Dictionary<string/*!*/, int>/*!*/ label2Id;
-      // candidate to block to Bool Control variable
-      public Dictionary<int, Dictionary<Block, VCExpr>> candiate2block2controlVar;
       // Stores the candidate from which this one originated
       public Dictionary<int, int> candidateParent;
       // Mapping from candidate Id to the "si_unique_call" id that led to 
@@ -1688,7 +1616,6 @@ namespace VC {
         recentlyAddedCandidates = new HashSet<int>();
         argExprMap = new Dictionary<int, VCExpr>();
         recordExpr2Var = new Dictionary<BoogieCallExpr, VCExpr>();
-        candiate2block2controlVar = new Dictionary<int, Dictionary<Block, VCExpr>>();
 
         forcedCandidates = new HashSet<int>();
         extraRecursion = new Dictionary<string, int>();
@@ -1741,21 +1668,6 @@ namespace VC {
 
         // Special
         return ret - extraRecursion[str];
-      }
-
-      // This procedure returns the stack depth of the candidate
-      // (distance from main)
-      public int getStackDepth(int id)
-      {
-          int ret = 1;
-
-          while (candidateParent.ContainsKey(id))
-          {
-              ret++;
-              id = candidateParent[id];
-          }
-
-          return ret;
       }
 
       // Set user-define increment/decrement to recursionBound
@@ -1943,8 +1855,6 @@ namespace VC {
             int candidateId = GetNewId(callExpr);
             boogieExpr2Id[new BoogieCallExpr(naryExpr, currInlineCount)] = candidateId;
             candidateParent[candidateId] = currInlineCount;
-            candiate2block2controlVar[candidateId] = new Dictionary<Block, VCExpr>();
-
             string label = GetLabel(candidateId);
             var unique_call_id = QKeyValue.FindIntAttribute(acmd.Attributes, "si_unique_call", -1);
             if (unique_call_id != -1)
@@ -1965,6 +1875,22 @@ namespace VC {
               // pure function (not procedure) and the function got inlined
               return retnary[0];
           }
+        }
+
+        // summary candidate
+        if (lop.label.Substring(1).StartsWith("candidate_")) {
+          var pname = lop.label.Substring("candidate_".Length + 1);
+
+          if (!summaryTemp.ContainsKey(pname))
+            summaryTemp.Add(pname, new List<Tuple<VCExprVar, VCExpr>>());
+
+          var expr = retnary[0] as VCExprNAry;
+          if (expr == null) return retnary[0];
+          if (expr.Op != VCExpressionGenerator.ImpliesOp) return retnary[0];
+          var tup = Tuple.Create(expr[0] as VCExprVar, expr[1]);
+          summaryTemp[pname].Add(tup);
+
+          return retnary[0];
         }
 
         // Else, rename label
@@ -2029,7 +1955,7 @@ namespace VC {
 
       protected override HashSet<VCExprVar> CombineResults(List<HashSet<VCExprVar>> results, bool arg) {
         var ret = new HashSet<VCExprVar>();
-        results.Iter(s => ret.UnionWith(s));
+        results.ForEach(s => ret.UnionWith(s));
         return ret;
       }
     }
@@ -2082,7 +2008,11 @@ namespace VC {
 
     } // end FCallInliner
 
+    public class EmptyErrorHandler : ProverInterface.ErrorHandler {
+      public override void OnModel(IList<string> labels, Model model) {
 
+      }
+    }
 
     public class StratifiedInliningErrorReporter : ProverInterface.ErrorHandler {
       Dictionary<string, StratifiedInliningInfo> implName2StratifiedInliningInfo;
@@ -2261,20 +2191,13 @@ namespace VC {
         return;
       }
 
-      public override void OnResourceExceeded(string message, IEnumerable<Tuple<AssertCmd, TransferCmd>> assertCmds = null)
-      {
-          //Contract.Requires(message != null);
-      }
+      public override void OnModel(IList<string/*!*/>/*!*/ labels, Model model) {
+        Contract.Assert(CommandLineOptions.Clo.StratifiedInliningWithoutModels || model != null);
 
-      public override void OnModel(IList<string/*!*/>/*!*/ labels, Model model, ProverInterface.Outcome proverOutcome) {
         if (CommandLineOptions.Clo.PrintErrorModel >= 1 && model != null) {
           model.Write(ErrorReporter.ModelWriter);
           ErrorReporter.ModelWriter.Flush();
         }
-
-        // Timeout?
-        if (proverOutcome != ProverInterface.Outcome.Invalid)
-            return;
 
         candidatesToExpand = new List<int>();
         orderedStateIds = new List<Tuple<int, int>>();
@@ -2295,56 +2218,25 @@ namespace VC {
 
         Hashtable traceNodes = new Hashtable();
 
-        if (!CommandLineOptions.Clo.SIBoolControlVC)
-        {
-            foreach (string s in labels)
-            {
-                Contract.Assert(s != null);
-                var absylabel = calls.ParseRenamedAbsyLabel(s, candidateId);
+        foreach (string s in labels) {
+          Contract.Assert(s != null);
+          var absylabel = calls.ParseRenamedAbsyLabel(s, candidateId);
 
-                if (absylabel == null) continue;
+          if (absylabel == null) continue;
 
-                Absy absy;
+          Absy absy;
 
-                if (candidateId == 0)
-                {
-                    absy = Label2Absy(absylabel);
-                }
-                else
-                {
-                    absy = Label2Absy(procImpl.Name, absylabel);
-                }
+          if (candidateId == 0) {
+            absy = Label2Absy(absylabel);
+          }
+          else {
+            absy = Label2Absy(procImpl.Name, absylabel);
+          }
 
-                if (traceNodes.ContainsKey(absy))
-                    System.Console.WriteLine("Warning: duplicate label: " + s + " read while tracing nodes");
-                else
-                    traceNodes.Add(absy, null);
-            }
-        }
-        else
-        {
-            Debug.Assert(CommandLineOptions.Clo.UseProverEvaluate, "Must use prover evaluate option with boolControlVC");
-            var block = procImpl.Blocks[0];
-            traceNodes.Add(block, null);
-            while (true)
-            {
-                var gc = block.TransferCmd as GotoCmd;
-                if (gc == null) break;
-                Block next = null;
-                foreach (var succ in gc.labelTargets)
-                {
-                    var succtaken = (bool) theoremProver.Evaluate(calls.candiate2block2controlVar[candidateId][succ]);
-                    if (succtaken)
-                    {
-                        next = succ;
-                        traceNodes.Add(succ, null);
-                        break;
-                    }
-                }
-                Debug.Assert(next != null, "Must find a successor");
-                Debug.Assert(traceNodes.ContainsKey(next), "CFG cannot be cyclic");
-                block = next;
-            }
+          if (traceNodes.ContainsKey(absy))
+            System.Console.WriteLine("Warning: duplicate label: " + s + " read while tracing nodes");
+          else
+            traceNodes.Add(absy, null);
         }
 
         List<Block> trace = new List<Block>();
@@ -2357,42 +2249,6 @@ namespace VC {
         Counterexample newCounterexample = GenerateTraceRec(labels, errModel, mvInfo, candidateId, entryBlock, traceNodes, trace, calleeCounterexamples);
 
         return newCounterexample;
-      }
-
-      private String GenerateTraceValue(Model.Element element) {
-        var str = new StringWriter();
-        if (element is Model.DatatypeValue) {
-          var val = (Model.DatatypeValue) element;
-          if (val.ConstructorName == "_" && val.Arguments[0].ToString() == "(as-array)") {
-            var parens = val.Arguments[1].ToString();
-            var func = element.Model.TryGetFunc(parens.Substring(1, parens.Length - 2));
-            if (func != null) {
-              str.Write("{");
-              var appCount = 0;
-              foreach (var app in func.Apps) {
-                if (appCount++ > 0)
-                  str.Write(",");
-                str.Write("\"");
-                var argCount = 0;
-                foreach (var arg in app.Args) {
-                  if (argCount++ > 0)
-                    str.Write(",");
-                  str.Write(GenerateTraceValue(arg));
-                }
-                str.Write("\":{0}", GenerateTraceValue(app.Result));
-              }
-              if (func.Else != null) {
-                if (func.AppCount > 0)
-                  str.Write(",");
-                str.Write("\"*\":{0}", GenerateTraceValue(func.Else));
-              }
-              str.Write("}");
-            }
-          }
-        }
-        if (str.ToString() == "")
-          str.Write(element.ToString().Replace(" ","").Replace("(","").Replace(")",""));
-        return str.ToString();
       }
 
       private Counterexample GenerateTraceRec(
@@ -2413,14 +2269,10 @@ namespace VC {
             Cmd cmd = cce.NonNull(cmds[i]);
 
             // Skip if 'cmd' not contained in the trace or not an assert
-            if ((cmd is AssertCmd && traceNodes.Contains(cmd)) ||
-                 (cmd is AssumeCmd && QKeyValue.FindBoolAttribute((cmd as AssumeCmd).Attributes, "exitAssert")))
-            {
-                var acmd = cmd as AssertCmd;
-                if (acmd == null) { acmd = new AssertCmd(Token.NoToken, Expr.True); }
-                Counterexample newCounterexample = AssertCmdToCounterexample(acmd, transferCmd, trace, errModel, mvInfo, theoremProver.Context);
-                newCounterexample.AddCalleeCounterexample(calleeCounterexamples);
-                return newCounterexample;
+            if (cmd is AssertCmd && traceNodes.Contains(cmd)) {
+              Counterexample newCounterexample = AssertCmdToCounterexample((AssertCmd)cmd, transferCmd, trace, errModel, mvInfo, theoremProver.Context);
+              newCounterexample.AddCalleeCounterexample(calleeCounterexamples);
+              return newCounterexample;
             }
 
             // Counterexample generation for inlined procedures
@@ -2483,7 +2335,7 @@ namespace VC {
                       Model.Func f = errModel.TryGetFunc(name);
                       if (f != null)
                       {
-                          args.Add(GenerateTraceValue(f.GetConstant()));
+                          args.Add(f.GetConstant());
                       }
                   }
                   else
@@ -2551,6 +2403,11 @@ namespace VC {
         return cce.NonNull((Absy)l2a[id]);
       }
 
+      public override void OnResourceExceeded(string msg) {
+        //Contract.Requires(msg != null);
+        //resourceExceededMessage = msg;
+      }
+
       public override void OnProverWarning(string msg) {
         //Contract.Requires(msg != null);
         callback.OnWarning(msg);
@@ -2558,382 +2415,5 @@ namespace VC {
     }
 
   } // class StratifiedVCGen
-
-  public class EmptyErrorHandler : ProverInterface.ErrorHandler
-  {
-      public override void OnModel(IList<string> labels, Model model, ProverInterface.Outcome proverOutcome)
-      { }
-  }
-
-  public class InvalidProgramForSecureVc : Exception
-  {
-      public InvalidProgramForSecureVc(string msg) :
-          base(msg) { }
-  }
-
-  public class SecureVCGen : VCGen
-  {
-      // Z3
-      ProverInterface prover;
-      // Handler
-      ErrorReporter handler;
-      // dump file
-      public static TokenTextWriter outfile = null;
-
-
-      public SecureVCGen(Program program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers)
-          : base(program, logFilePath, appendLogFile, checkers)
-      {
-          prover = null;
-          handler = null;
-          if (CommandLineOptions.Clo.SecureVcGen != "" && outfile == null)
-          {
-              outfile = new TokenTextWriter(new StreamWriter(CommandLineOptions.Clo.SecureVcGen));
-              CommandLineOptions.Clo.PrintInstrumented = true;
-              var implsToVerify = new HashSet<string>(
-                  program.TopLevelDeclarations.OfType<Implementation>()
-                  .Where(impl => !impl.SkipVerification)
-                  .Select(impl => impl.Name));
-
-              foreach (var decl in program.TopLevelDeclarations)
-              {
-                  if (decl is NamedDeclaration && implsToVerify.Contains((decl as NamedDeclaration).Name))
-                      continue;
-                  decl.Emit(outfile, 0);
-              }
-          }
-      }
-
-      private Block GetExitBlock(Implementation impl)
-      {
-          var exitblocks = impl.Blocks.Where(blk => blk.TransferCmd is ReturnCmd);
-          if (exitblocks.Count() == 1)
-              return exitblocks.First();
-          // create a new exit block
-          var eb = new Block(Token.NoToken, "SVCeb", new List<Cmd>(), new ReturnCmd(Token.NoToken));
-          foreach (var b in exitblocks)
-          {
-              b.TransferCmd = new GotoCmd(Token.NoToken, new List<Block> { eb });
-          }
-          impl.Blocks.Add(eb);
-          return eb;
-      }
-
-      //static int LocalVarCounter = 0;
-      private LocalVariable GetNewLocal(Variable v, string suffix)
-      {
-          return new LocalVariable(Token.NoToken, new TypedIdent(Token.NoToken,
-              string.Format("svc_{0}_{1}", v.Name, suffix), v.TypedIdent.Type));
-      }
-
-      private void GenVc(Implementation impl, VerifierCallback collector)
-      {
-          if (impl.Proc.Requires.Any())
-              throw new InvalidProgramForSecureVc("SecureVc: Requires not supported");
-          if(impl.LocVars.Any(v => isVisible(v)))
-              throw new InvalidProgramForSecureVc("SecureVc: Visible Local variables not allowed");
-
-          // Desugar procedure calls
-          DesugarCalls(impl);
-
-          // Gather spec, remove existing ensures
-          var secureAsserts = new List<AssertCmd>();
-          var logicalAsserts = new List<AssertCmd>();
-          
-          foreach (var ens in impl.Proc.Ensures)
-          {
-              if(ens.Free)
-                  throw new InvalidProgramForSecureVc("SecureVc: Free Ensures not supported");
-              var dd = new Duplicator();
-              secureAsserts.Add(new AssertCmd(ens.tok, Expr.Not(ens.Condition)));
-              logicalAsserts.Add(dd.VisitAssertCmd(new AssertCmd(ens.tok, ens.Condition)) as AssertCmd);
-          }
-          impl.Proc.Ensures.Clear();
-
-          // Make a copy of the impl
-          var dup = new Duplicator();
-          var implDup = dup.VisitImplementation(impl);
-
-          // Get exit block
-          var eb = GetExitBlock(impl);
-
-          // Create two blocks: one for secureAsserts, one for logical asserts
-          var ebSecure = new Block(Token.NoToken, "svc_secure_asserts", new List<Cmd>(), new ReturnCmd(Token.NoToken));
-          var ebLogical = new Block(Token.NoToken, "svc_logical_asserts", new List<Cmd>(), new ReturnCmd(Token.NoToken));
-
-          eb.TransferCmd = new GotoCmd(eb.TransferCmd.tok, new List<Block> { ebSecure, ebLogical });
-          impl.Blocks.Add(ebSecure);
-          impl.Blocks.Add(ebLogical);
-
-          // Rename spec, while create copies of the hidden variables
-          var substOld = new Dictionary<Variable, Expr>();
-          var substVarSpec = new Dictionary<Variable, Expr>();
-          var substVarPath = new Dictionary<Variable, Expr>();
-          foreach (var g in program.GlobalVariables)
-          {
-              if (!isHidden(g)) continue;
-              var lv = GetNewLocal(g, "In");
-              impl.LocVars.Add(lv);
-              substOld.Add(g, Expr.Ident(lv));
-          }
-
-          for(int i = 0; i < impl.InParams.Count; i++)
-          {
-              var v = impl.Proc.InParams[i];
-              if (!isHidden(v))
-              {
-                  substVarSpec.Add(impl.Proc.InParams[i], Expr.Ident(impl.InParams[i]));
-                  continue;
-              }
-
-              var lv = GetNewLocal(v, "In");
-              impl.LocVars.Add(lv);
-              substVarSpec.Add(v, Expr.Ident(lv));
-              substVarPath.Add(impl.InParams[i], Expr.Ident(lv));
-          }
-
-          for (int i = 0; i < impl.OutParams.Count; i++)
-          {
-              var v = impl.Proc.OutParams[i];
-              if (!isHidden(v))
-              {
-                  substVarSpec.Add(impl.Proc.OutParams[i], Expr.Ident(impl.OutParams[i]));
-                  continue;
-              }
-
-              var lv = GetNewLocal(v, "Out");
-              impl.LocVars.Add(lv);
-              substVarSpec.Add(v, Expr.Ident(lv));
-              substVarPath.Add(impl.OutParams[i], Expr.Ident(lv));
-          }
-
-          foreach (var g in program.GlobalVariables)
-          {
-              if (!isHidden(g)) continue;
-              if (!impl.Proc.Modifies.Any(ie => ie.Name == g.Name)) continue;
-
-              var lv = GetNewLocal(g, "Out");
-              impl.LocVars.Add(lv);
-              substVarSpec.Add(g, Expr.Ident(lv));
-              substVarPath.Add(g, Expr.Ident(lv));
-          }
-
-          secureAsserts = secureAsserts.ConvertAll(ac => 
-              Substituter.ApplyReplacingOldExprs(
-                 Substituter.SubstitutionFromHashtable(substVarSpec),
-                 Substituter.SubstitutionFromHashtable(substOld),
-                 ac) as AssertCmd);
-
-          var substVarProcToImpl = new Dictionary<Variable, Expr>();
-          for (int i = 0; i < impl.InParams.Count; i++)
-              substVarProcToImpl.Add(impl.Proc.InParams[i], Expr.Ident(impl.InParams[i]));
-
-          for (int i = 0; i < impl.OutParams.Count; i++)
-              substVarProcToImpl.Add(impl.Proc.OutParams[i], Expr.Ident(impl.OutParams[i]));
-
-          logicalAsserts = logicalAsserts.ConvertAll(ac =>
-              Substituter.Apply(Substituter.SubstitutionFromHashtable(substVarProcToImpl), ac)
-              as AssertCmd);
-
-          // Paths
-          foreach (var path in GetAllPaths(implDup))
-          {
-              var wp = ComputeWP(implDup, path);
-
-              // replace hidden variables to match those used in the spec
-              wp = Substituter.ApplyReplacingOldExprs(
-                  Substituter.SubstitutionFromHashtable(substVarPath),
-                  Substituter.SubstitutionFromHashtable(substOld),
-                  wp);
-
-              ebSecure.Cmds.Add(new AssumeCmd(Token.NoToken, Expr.Not(wp)));
-          }
-
-          ebSecure.Cmds.AddRange(secureAsserts);
-          ebLogical.Cmds.AddRange(logicalAsserts);
-
-          if (outfile != null)
-          {
-              impl.Proc.Emit(outfile, 0);
-              impl.Emit(outfile, 0);
-          }
-
-          ModelViewInfo mvInfo;
-          ConvertCFG2DAG(impl);
-          var gotoCmdOrigins = PassifyImpl(impl, out mvInfo);
-
-          var gen = prover.VCExprGen;
-          var exprGen = prover.Context.ExprGen;
-          var translator = prover.Context.BoogieExprTranslator;
-
-          var label2absy = new Dictionary<int, Absy>();
-          VCGen.CodeExprConversionClosure cc = new VCGen.CodeExprConversionClosure(label2absy, prover.Context);
-          translator.SetCodeExprConverter(cc.CodeExprToVerificationCondition);
-          var implVc = gen.Not(GenerateVCAux(impl, null, label2absy, prover.Context));
-
-          handler = new VCGen.ErrorReporter(gotoCmdOrigins, label2absy, impl.Blocks, incarnationOriginMap, collector, mvInfo, prover.Context, program);
-
-          prover.Assert(implVc, true);
-      }
-
-      Expr ComputeWP(Implementation impl, List<Cmd> path)
-      {
-          Expr expr = Expr.True;
-
-          // create constants for out varibles
-          var subst = new Dictionary<Variable, Expr>();
-          foreach (var g in impl.Proc.Modifies)
-          {
-              var c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken,
-                  "svc_out_const_" + g.Name, g.Decl.TypedIdent.Type));
-              subst.Add(c, g);
-              expr = Expr.And(expr, Expr.Eq(Expr.Ident(c), g));
-          }
-
-          foreach (var v in impl.OutParams)
-          {
-              var c = new Constant(Token.NoToken, new TypedIdent(Token.NoToken,
-                  "svc_out_const_" + v.Name, v.TypedIdent.Type));
-              subst.Add(c, Expr.Ident(v));
-              expr = Expr.And(expr, Expr.Eq(Expr.Ident(c), Expr.Ident(v)));
-          }        
-
-          // we need this technicality
-          var subst1 = new Dictionary<Variable, Expr>();
-          foreach (var g in program.GlobalVariables)
-          {
-              subst1.Add(g, new OldExpr(Token.NoToken, Expr.Ident(g)));
-          }
-
-          // Implicitly close with havoc of all the locals and OutParams
-          path.Insert(0, new HavocCmd(Token.NoToken, new List<IdentifierExpr>(
-              impl.LocVars.Select(v => Expr.Ident(v)).Concat(
-              impl.OutParams.Select(v => Expr.Ident(v))))));
-
-          for (int i = path.Count - 1; i >= 0; i--)
-          {
-              var cmd = path[i];
-              if (cmd is AssumeCmd)
-              {
-                  expr = Expr.And(expr, (cmd as AssumeCmd).Expr);
-              }
-              else if (cmd is AssignCmd)
-              {
-                  var h = new Dictionary<Variable, Expr>();
-                  var acmd = cmd as AssignCmd;
-                  for (int j = 0; j < acmd.Lhss.Count; j++)
-                  {
-                      h.Add(acmd.Lhss[j].DeepAssignedVariable, acmd.Rhss[j]);
-                  }
-                  var s = Substituter.SubstitutionFromHashtable(h);
-                  expr = Substituter.Apply(s, expr);
-              }
-              else if (cmd is HavocCmd)
-              {
-                  var h = new Dictionary<Variable, Expr>();
-                  var formals = new List<Variable>();
-
-                  var vc = new VariableCollector();
-                  vc.VisitExpr(expr);
-
-                  foreach (var ie in (cmd as HavocCmd).Vars)
-                  {
-                      if (!vc.usedVars.Contains(ie.Decl)) continue;
-                      var f = new BoundVariable(Token.NoToken, new TypedIdent(Token.NoToken,
-                          ie.Decl.Name + "_formal", ie.Decl.TypedIdent.Type));
-                      h.Add(ie.Decl, Expr.Ident(f));
-                      formals.Add(f);
-                  }
-                  if (!formals.Any())
-                      continue;
-                  var s = Substituter.SubstitutionFromHashtable(h);
-                  expr = Substituter.Apply(s, expr);
-                  expr = new ExistsExpr(Token.NoToken, formals, expr);
-              }
-              else
-              {
-                  throw new InvalidProgramForSecureVc(string.Format("Unhandled cmd: {0}", cmd));
-              }
-          }
-
-          // Implicitly close with havoc of all the locals and OutParams
-
-
-
-          expr = Substituter.Apply(Substituter.SubstitutionFromHashtable(subst1), expr);
-          expr = Substituter.Apply(Substituter.SubstitutionFromHashtable(subst), 
-              Substituter.SubstitutionFromHashtable(new Dictionary<Variable,Expr>()), expr);
-          expr.Typecheck(new TypecheckingContext(null));
-          return expr;
-      }
-
-      // Generate all paths in the impl
-      IEnumerable<List<Cmd>> GetAllPaths(Implementation impl)
-      {
-          var stk = new Stack<Tuple<Block, int>>();
-          stk.Push(Tuple.Create(impl.Blocks[0], 0));
-
-          while (stk.Any())
-          {
-              var tup = stk.Peek();
-              if (tup.Item1.TransferCmd is ReturnCmd)
-              {
-                  var ret = new List<Cmd>();
-                  var ls = stk.ToList();
-                  ls.Iter(t => ret.AddRange(t.Item1.Cmds));
-                  yield return ret;
-
-                  stk.Pop();
-                  continue;
-              }
-
-              stk.Pop();
-
-              var gc = tup.Item1.TransferCmd as GotoCmd;
-              if (gc.labelTargets.Count <= tup.Item2)
-                  continue;
-
-              stk.Push(Tuple.Create(tup.Item1, tup.Item2 + 1));
-              stk.Push(Tuple.Create(gc.labelTargets[tup.Item2], 0));
-          }
-          yield break;
-      }
-
-      bool isHidden(Variable v)
-      {
-          return QKeyValue.FindBoolAttribute(v.Attributes, "hidden");
-      }
-
-      bool isVisible(Variable v)
-      {
-          return !isHidden(v);
-      }
-
-      public override Outcome VerifyImplementation(Implementation/*!*/ impl, VerifierCallback/*!*/ callback)
-      {
-          // Record current time
-          var startTime = DateTime.UtcNow;
-
-          CommandLineOptions.Clo.ProverCCLimit = 1;
-          prover = ProverInterface.CreateProver(program, logFilePath, appendLogFile, CommandLineOptions.Clo.ProverKillTime);
-
-          // Flush any axioms that came with the program before we start SI on this implementation
-          prover.AssertAxioms();
-
-          GenVc(impl, callback);
-
-          prover.Check();
-          var outcome = prover.CheckOutcomeCore(handler);
-          //var outcome = ProverInterface.Outcome.Valid;
-          
-          prover.Close();
-
-
-
-          //Console.WriteLine("Answer = {0}", outcome);
-
-          return ProverInterfaceOutcomeToConditionGenerationOutcome(outcome);
-      }
-  }
 
 } // namespace VC

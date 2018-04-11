@@ -24,6 +24,7 @@ public class SmartBlockPredicator {
   IdentifierExpr fp;
   Dictionary<Microsoft.Boogie.Type, IdentifierExpr> havocVars =
     new Dictionary<Microsoft.Boogie.Type, IdentifierExpr>();
+  Dictionary<Block, Expr> blockIds = new Dictionary<Block, Expr>();
   HashSet<Block> doneBlocks = new HashSet<Block>();
   bool myUseProcedurePredicates;
   UniformityAnalyser uni;
@@ -36,7 +37,7 @@ public class SmartBlockPredicator {
     uni = u;
   }
 
-  void PredicateCmd(Expr p, Expr pDom, List<Block> blocks, Block block, Cmd cmd, out Block nextBlock) {
+  void PredicateCmd(Expr p, List<Block> blocks, Block block, Cmd cmd, out Block nextBlock) {
     var cCmd = cmd as CallCmd;
     if (cCmd != null && !useProcedurePredicates(cCmd.Proc)) {
       if (p == null) {
@@ -66,22 +67,18 @@ public class SmartBlockPredicator {
         new GotoCmd(Token.NoToken, new List<Block> { contBlock });
       nextBlock = contBlock;
     } else {
-      PredicateCmd(p, pDom, block.Cmds, cmd);
+      PredicateCmd(p, block.Cmds, cmd);
       nextBlock = block;
     }
   }
 
-  void PredicateCmd(Expr p, Expr pDom, List<Cmd> cmdSeq, Cmd cmd) {
+  void PredicateCmd(Expr p, List<Cmd> cmdSeq, Cmd cmd) {
     if (cmd is CallCmd) {
       var cCmd = (CallCmd)cmd;
       Debug.Assert(useProcedurePredicates(cCmd.Proc));
-      foreach (IdentifierExpr e in cCmd.Outs) {
-        cCmd.Ins.Add(e);
-      }
       cCmd.Ins.Insert(0, p != null ? p : Expr.True);
       cmdSeq.Add(cCmd);
     } else if (p == null) {
-      new EnabledReplacementVisitor(Expr.True, pDom).Visit(cmd);
       cmdSeq.Add(cmd);
     } else if (cmd is AssignCmd) {
       var aCmd = (AssignCmd)cmd;
@@ -92,12 +89,12 @@ public class SmartBlockPredicator {
                        new List<Expr> { p, rhs, lhs.AsExpr })))));
     } else if (cmd is AssertCmd) {
       var aCmd = (AssertCmd)cmd;
-      Expr newExpr = new EnabledReplacementVisitor(p, pDom).VisitExpr(aCmd.Expr);
+      Expr newExpr = new EnabledReplacementVisitor(p).VisitExpr(aCmd.Expr);
       aCmd.Expr = QKeyValue.FindBoolAttribute(aCmd.Attributes, "do_not_predicate") ? newExpr : Expr.Imp(p, newExpr);
       cmdSeq.Add(aCmd);
     } else if (cmd is AssumeCmd) {
       var aCmd = (AssumeCmd)cmd;
-      Expr newExpr = new EnabledReplacementVisitor(p, pDom).VisitExpr(aCmd.Expr);
+      Expr newExpr = new EnabledReplacementVisitor(p).VisitExpr(aCmd.Expr);
       aCmd.Expr = QKeyValue.FindBoolAttribute(aCmd.Attributes, "do_not_predicate") ? newExpr : Expr.Imp(p, newExpr);
       cmdSeq.Add(aCmd);
     } else if (cmd is HavocCmd) {
@@ -130,7 +127,7 @@ public class SmartBlockPredicator {
       var sCmd = (StateCmd)cmd;
       var newCmdSeq = new List<Cmd>();
       foreach (Cmd c in sCmd.Cmds)
-        PredicateCmd(p, pDom, newCmdSeq, c);
+        PredicateCmd(p, newCmdSeq, c);
       sCmd.Cmds = newCmdSeq;
       cmdSeq.Add(sCmd);
     } else {
@@ -150,11 +147,10 @@ public class SmartBlockPredicator {
         gCmd.labelTargets.Cast<Block>().Any(b => predMap.ContainsKey(b));
 
       if (gCmd.labelTargets.Count == 1) {
-        if (defMap.ContainsKey(gCmd.labelTargets[0])) {
-          PredicateCmd(p, Expr.True, cmdSeq,
+        if (defMap.ContainsKey(gCmd.labelTargets[0]))
+          PredicateCmd(p, cmdSeq,
                        Cmd.SimpleAssign(Token.NoToken,
                                         Expr.Ident(predMap[gCmd.labelTargets[0]]), Expr.True));
-        }
       } else {
         Debug.Assert(gCmd.labelTargets.Count > 1);
         Debug.Assert(gCmd.labelTargets.Cast<Block>().All(t => uni.IsUniform(impl.Name, t) ||
@@ -163,15 +159,11 @@ public class SmartBlockPredicator {
           if (!partInfo.ContainsKey(target))
             continue;
 
-          // In this case we not only predicate with the current predicate p,
-          // but also with the "part predicate"; this ensures that we do not
-          // update a predicate twice when it occurs in both parts.
           var part = partInfo[target];
-          if (defMap.ContainsKey(part.realDest)) {
-            PredicateCmd(p == null ? part.pred : Expr.And(p, part.pred), Expr.True, cmdSeq,
+          if (defMap.ContainsKey(part.realDest))
+            PredicateCmd(p, cmdSeq,
                          Cmd.SimpleAssign(Token.NoToken,
                                           Expr.Ident(predMap[part.realDest]), part.pred));
-          }
           var predsExitingLoop = new Dictionary<Block, List<Expr>>();
           foreach (Block exit in LoopsExited(src, target)) {
             List<Expr> predList;
@@ -182,7 +174,7 @@ public class SmartBlockPredicator {
             predList.Add(part.pred);
           }
           foreach (var pred in predsExitingLoop) {
-            PredicateCmd(p == null ? part.pred : Expr.And(p, part.pred), Expr.True, cmdSeq,
+            PredicateCmd(p, cmdSeq,
                          Cmd.SimpleAssign(Token.NoToken,
                                           Expr.Ident(predMap[pred.Key]),
                                           Expr.Not(pred.Value.Aggregate(Expr.Or))));
@@ -210,7 +202,6 @@ public class SmartBlockPredicator {
   void AssignPredicates(Graph<Block> blockGraph,
                         DomRelation<Block> dom,
                         DomRelation<Block> pdom,
-                        IEnumerable<Block> headerDominance,
                         IEnumerator<Tuple<Block, bool>> i,
                         Variable headPredicate,
                         ref int predCount) {
@@ -233,11 +224,11 @@ public class SmartBlockPredicator {
           return;
         }
       }
-
+     
       if (uni != null && uni.IsUniform(impl.Name, block.Item1)) {
         if (blockGraph.Headers.Contains(block.Item1)) {
           parentMap[block.Item1] = header;
-          AssignPredicates(blockGraph, dom, pdom, headerDominance, i, headPredicate, ref predCount);
+          AssignPredicates(blockGraph, dom, pdom, i, headPredicate, ref predCount);
         }
         continue;
       }
@@ -247,7 +238,7 @@ public class SmartBlockPredicator {
           parentMap[block.Item1] = header;
           var loopPred = FreshPredicate(ref predCount);
           ownedPreds.Add(loopPred);
-          AssignPredicates(blockGraph, dom, pdom, headerDominance, i, loopPred, ref predCount);
+          AssignPredicates(blockGraph, dom, pdom, i, loopPred, ref predCount);
         } else {
           bool foundExisting = false;
           foreach (var regionPred in regionPreds) {
@@ -262,26 +253,7 @@ public class SmartBlockPredicator {
             var condPred = FreshPredicate(ref predCount);
             predMap[block.Item1] = condPred;
             defMap[block.Item1] = condPred;
-            var headerIterator = headerDominance.GetEnumerator();
-            // Add the predicate to the loop header H that dominates the node (if one
-            // exists) such that H does not dominate another header which also dominates
-            // the node. Since predicates are owned by loop headers (or the program entry
-            // node), this is the block 'closest' to block to which we are assigning a
-            // that can be made to own the predicate.
-            Block node = null;
-            while (headerIterator.MoveNext()) {
-              var current = headerIterator.Current;
-              if (dom.DominatedBy(block.Item1, current)) {
-                node = current;
-                break;
-              }
-            }
-            if (node != null) {
-              ownedMap[node].Add(condPred);
-            } else {
-               // In this case the header is the program entry node.
-              ownedPreds.Add(condPred);
-            }
+            ownedPreds.Add(condPred);
             regionPreds.Add(new Tuple<Block, Variable>(block.Item1, condPred));
           }
         }
@@ -294,7 +266,6 @@ public class SmartBlockPredicator {
 
     Graph<Block> dualGraph = blockGraph.Dual(new Block());
     DomRelation<Block> pdom = dualGraph.DominatorMap;
-    IEnumerable<Block> headerDominance = blockGraph.SortHeadersByDominance();
 
     var iter = sortedBlocks.GetEnumerator();
     if (!iter.MoveNext()) {
@@ -308,7 +279,7 @@ public class SmartBlockPredicator {
     defMap = new Dictionary<Block, Variable>();
     ownedMap = new Dictionary<Block, HashSet<Variable>>();
     parentMap = new Dictionary<Block, Block>();
-    AssignPredicates(blockGraph, dom, pdom, headerDominance, iter,
+    AssignPredicates(blockGraph, dom, pdom, iter,
                      myUseProcedurePredicates ? impl.InParams[0] : null,
                      ref predCount);
   }
@@ -393,19 +364,6 @@ public class SmartBlockPredicator {
     return partInfo;
   }
 
-  Block FindImmediateDominator(Block block) {
-    Block predecessor = null;
-    foreach(var pred in blockGraph.Predecessors(block)) {
-      if (!blockGraph.DominatorMap.DominatedBy(pred, block)) {
-        if (predecessor == null)
-          predecessor = pred;
-        else
-          predecessor = blockGraph.DominatorMap.LeastCommonAncestor(pred, predecessor);
-      }
-    }
-    return predecessor;
-  }
-
   void PredicateImplementation() {
     blockGraph = prog.ProcessLoops(impl);
     sortedBlocks = blockGraph.LoopyTopSort();
@@ -424,14 +382,6 @@ public class SmartBlockPredicator {
         var pExpr = Expr.Ident(p);
 
         if (n.Item2) {
-          var dominator = FindImmediateDominator(n.Item1);
-          if (dominator != null && predMap.ContainsKey(dominator)) {
-            AssumeCmd aCmd = new AssumeCmd(Token.NoToken, Expr.True);
-            aCmd.Attributes = new QKeyValue(Token.NoToken, "dominator_predicate", new List<object>() { predMap[dominator].ToString() }, aCmd.Attributes);
-            aCmd.Attributes = new QKeyValue(Token.NoToken, "predicate", new List<object>() { predMap[n.Item1].ToString() }, aCmd.Attributes);
-            n.Item1.Cmds.Insert(0, aCmd);
-          }
-
           var backedgeBlock = new Block();
           newBlocks.Add(backedgeBlock);
 
@@ -483,31 +433,21 @@ public class SmartBlockPredicator {
       prevBlock.TransferCmd = new GotoCmd(Token.NoToken, new List<Block> { block });
     }
 
-    Block currentBlock = block;
-    Expr pCurrentExpr = pExpr;
-    while (parentMap.ContainsKey(currentBlock)) {
-      Block parent = parentMap[currentBlock];
-      Expr pParentExpr = null;
+    if (parentMap.ContainsKey(block)) {
+      var parent = parentMap[block];
       if (predMap.ContainsKey(parent)) {
         var parentPred = predMap[parent];
         if (parentPred != null) {
-          pParentExpr = Expr.Ident(parentPred);
           block.Cmds.Add(new AssertCmd(Token.NoToken,
-                                          pCurrentExpr != null ? (Expr)Expr.Imp(pCurrentExpr, pParentExpr)
-                                                               : pParentExpr));
+                                          pExpr != null ? (Expr)Expr.Imp(pExpr, Expr.Ident(parentPred))
+                                                        : Expr.Ident(parentPred)));
         }
       }
-      currentBlock = parent;
-      pCurrentExpr = pParentExpr;
     }
 
-    Block dominator = FindImmediateDominator(block);
-    Expr pDomExpr = Expr.True;
-    if (dominator != null && predMap.ContainsKey(dominator))
-      pDomExpr = new IdentifierExpr(Token.NoToken, predMap[dominator]);
     var transferCmd = block.TransferCmd;
     foreach (Cmd cmd in oldCmdSeq)
-      PredicateCmd(pExpr, pDomExpr, newBlocks, block, cmd, out block);
+      PredicateCmd(pExpr, newBlocks, block, cmd, out block);
 
     if (ownedMap.ContainsKey(firstBlock)) {
       var owned = ownedMap[firstBlock];
@@ -557,76 +497,35 @@ public class SmartBlockPredicator {
         bool upp = useProcedurePredicates(proc);
         if (upp) {
           var dwf = (DeclWithFormals)decl;
-          // Copy InParams, as the list is shared between impl and proc
-          var inParams = new List<Variable>(dwf.InParams);
-
           var fpVar = new Formal(Token.NoToken,
                                  new TypedIdent(Token.NoToken, "_P",
                                                 Microsoft.Boogie.Type.Bool),
                                  /*incoming=*/true);
-          inParams.Insert(0, fpVar);
-          var fpIdentifierExpr = new IdentifierExpr(Token.NoToken, fpVar);
-
-          // Add in-parameters for all out-parameters. These new in-parameters
-          // are used to ensure we preserve the value of the variable assigned
-          // to when the passed predicate value is false.
-          var newEqParamExprs = new List<Expr>();
-          var newAssignCmds = new List<Cmd>();
-          foreach (Variable outV in dwf.OutParams) {
-            var inV = new Formal(Token.NoToken,
-                                 new TypedIdent(Token.NoToken, "_V" + outV.TypedIdent.Name,
-                                     outV.TypedIdent.Type),
-                                 /*incoming=*/true);
-            inParams.Add(inV);
-
-            var inVExpr = new IdentifierExpr(Token.NoToken, inV);
-            var outVExpr = new IdentifierExpr(Token.NoToken, outV);
-            newEqParamExprs.Add(Expr.Imp(Expr.Not(fpIdentifierExpr), Expr.Eq(inVExpr, outVExpr)));
-            newAssignCmds.Add(new AssignCmd(Token.NoToken,
-                                            new List<AssignLhs> { new SimpleAssignLhs(Token.NoToken, outVExpr) },
-                                            new List<Expr> { new NAryExpr(Token.NoToken,
-                                                             new IfThenElse(Token.NoToken),
-                                                             new List<Expr> { fpIdentifierExpr, outVExpr, inVExpr })}));
-          }
-          dwf.InParams = inParams;
+          dwf.InParams = new List<Variable>(
+            (new Variable[] {fpVar}.Concat(dwf.InParams.Cast<Variable>()))
+              .ToArray());
 
           if (impl == null) {
+            var fpIdentifierExpr = new IdentifierExpr(Token.NoToken, fpVar);
             foreach (Requires r in proc.Requires) {
-              new EnabledReplacementVisitor(fpIdentifierExpr, Expr.True).VisitExpr(r.Condition);
+              new EnabledReplacementVisitor(fpIdentifierExpr).VisitExpr(r.Condition);
               if (!QKeyValue.FindBoolAttribute(r.Attributes, "do_not_predicate")) {
                 r.Condition = Expr.Imp(fpIdentifierExpr, r.Condition);
               }
             }
             foreach (Ensures e in proc.Ensures) {
-              new EnabledReplacementVisitor(new IdentifierExpr(Token.NoToken, fpVar), Expr.True).VisitExpr(e.Condition);
+              new EnabledReplacementVisitor(new IdentifierExpr(Token.NoToken, fpVar)).VisitExpr(e.Condition);
               if (!QKeyValue.FindBoolAttribute(e.Attributes, "do_not_predicate")) {
                 e.Condition = Expr.Imp(fpIdentifierExpr, e.Condition);
               }
             }
-            foreach (Expr e in newEqParamExprs) {
-              proc.Ensures.Add(new Ensures(false, e));
-            }
-          } else {
-            try {
-              new SmartBlockPredicator(p, impl, useProcedurePredicates, uni).PredicateImplementation();
-              foreach (AssignCmd c in newAssignCmds) {
-                impl.Blocks.First().Cmds.Insert(0, c);
-              }
-            } catch (Program.IrreducibleLoopException) { }
           }
-        } else {
-          if (impl == null) {
-            foreach (Requires r in proc.Requires) {
-              new EnabledReplacementVisitor(Expr.True, Expr.True).VisitExpr(r.Condition);
-            }
-            foreach (Ensures e in proc.Ensures) {
-              new EnabledReplacementVisitor(Expr.True, Expr.True).VisitExpr(e.Condition);
-            }
-          } else {
-            try {
-              new SmartBlockPredicator(p, impl, useProcedurePredicates, uni).PredicateImplementation();
-            } catch (Program.IrreducibleLoopException) { }
-          }
+        }
+
+        if (impl != null) {
+          try {
+            new SmartBlockPredicator(p, impl, useProcedurePredicates, uni).PredicateImplementation();
+          } catch (Program.IrreducibleLoopException) { }
         }
       }
     }
@@ -639,34 +538,6 @@ public class SmartBlockPredicator {
     catch (Program.IrreducibleLoopException) { }
   }
 
-}
-
-class EnabledReplacementVisitor : StandardVisitor
-{
-    private Expr pExpr;
-    private Expr pDomExpr;
-
-    internal EnabledReplacementVisitor(Expr pExpr, Expr pDomExpr)
-    {
-        this.pExpr = pExpr;
-        this.pDomExpr = pDomExpr;
-    }
-
-    public override Expr VisitExpr(Expr node)
-    {
-        if (node is IdentifierExpr)
-        {
-            IdentifierExpr iExpr = node as IdentifierExpr;
-            if (iExpr.Decl is Constant && QKeyValue.FindBoolAttribute(iExpr.Decl.Attributes, "__enabled"))
-            {
-                return pExpr;
-            } else if (iExpr.Decl is Constant && QKeyValue.FindBoolAttribute(iExpr.Decl.Attributes, "__dominator_enabled"))
-            {
-                return pDomExpr;
-            }
-        }
-        return base.VisitExpr(node);
-    }
 }
 
 }

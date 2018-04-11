@@ -55,20 +55,6 @@ namespace Microsoft.Boogie {
       return new VCExprRealLit(x);
     }
 
-    public VCExpr/*!*/ Float(BigFloat x)
-    {
-      Contract.Ensures(Contract.Result<VCExpr>() != null);
-
-      return new VCExprFloatLit(x);
-    }
-
-    public VCExpr/*!*/ RMode(RoundingMode x)
-    {
-      Contract.Ensures(Contract.Result<VCExpr>() != null);
-
-      return new VCExprRModeLit(x);
-    }
-
     public VCExpr/*!*/ Function(VCExprOp/*!*/ op,
                             List<VCExpr/*!*/>/*!*/ arguments,
                             List<Type/*!*/>/*!*/ typeArguments) {
@@ -281,7 +267,7 @@ namespace Microsoft.Boogie {
         return True;
       return Or(e0, e1);
     }
-    public VCExpr ImpliesSimp(VCExpr e0, VCExpr e1, bool aggressive = true) {
+    public VCExpr ImpliesSimp(VCExpr e0, VCExpr e1) {
       Contract.Requires(e1 != null);
       Contract.Requires(e0 != null);
       Contract.Ensures(Contract.Result<VCExpr>() != null);
@@ -292,7 +278,7 @@ namespace Microsoft.Boogie {
       if (e0.Equals(False) || e1.Equals(True))
         return True;
       // attempt to save on the depth of expressions (to reduce chances of stack overflows)
-      while (aggressive && e1 is VCExprBinary) {
+      while (e1 is VCExprBinary) {
         VCExprBinary n = (VCExprBinary)e1;
         if (n.Op == ImpliesOp) {
           if (AndSize(n[0]) <= AndSize(e0)) {
@@ -353,29 +339,12 @@ namespace Microsoft.Boogie {
 
     public static readonly VCExprOp TickleBoolOp = new VCExprCustomOp("tickleBool", 1, Type.Bool);
 
-    public static readonly VCExprOp TimeoutDiagnosticsOp = new VCExprCustomOp("timeoutDiagnostics", 1, Type.Bool);
-
-    public static readonly VCExprOp MinimizeOp = new VCExprCustomOp("minimize##dummy", 2, Type.Bool);
-    public static readonly VCExprOp MaximizeOp = new VCExprCustomOp("maximize##dummy", 2, Type.Bool);
-    public static readonly VCExprOp NamedAssumeOp = new VCExprCustomOp("named_assume##dummy", 2, Type.Bool);
-
     public VCExprOp BoogieFunctionOp(Function func) {
       Contract.Requires(func != null);
       Contract.Ensures(Contract.Result<VCExprOp>() != null);
       return new VCExprBoogieFunctionOp(func);
     }
 
-    // Float nodes
-
-    public VCExprOp BinaryFloatOp(int sig, int exp, string op)
-    {
-      Contract.Requires(exp > 0);
-      Contract.Requires(sig > 0);
-      Contract.Requires(op != null);
-      Contract.Ensures(Contract.Result<VCExprOp>() != null);
-      return new VCExprBinaryFloatOp(sig, exp, op);
-    }
-        
     // Bitvector nodes
 
     public VCExpr Bitvector(BvConst bv) {
@@ -431,8 +400,7 @@ namespace Microsoft.Boogie {
       Subtype3Op,
       BvConcatOp,
       ToIntOp,
-      ToRealOp,
-      ToFloatOp
+      ToRealOp
     };
     internal static Dictionary<VCExprOp/*!*/, SingletonOp>/*!*/ SingletonOpDict;
     [ContractInvariantMethod]
@@ -884,56 +852,6 @@ namespace Microsoft.Boogie.VCExprAST {
     }
     [Pure]
     public override int GetHashCode() {
-      return Val.GetHashCode() * 72321;
-    }
-  }
-
-  public class VCExprFloatLit : VCExprLiteral
-  {
-    public readonly BigFloat Val;
-    internal VCExprFloatLit(BigFloat val)
-      : base(Type.GetFloatType(val.SignificandSize, val.ExponentSize))
-    {
-      this.Val = val;
-    }
-    [Pure]
-    [Reads(ReadsAttribute.Reads.Nothing)]
-    public override bool Equals(object that)
-    {
-      if (Object.ReferenceEquals(this, that))
-        return true;
-      if (that is VCExprFloatLit)
-        return Val == ((VCExprFloatLit)that).Val;
-      return false;
-    }
-    [Pure]
-    public override int GetHashCode()
-    {
-      return Val.GetHashCode() * 72321;
-    }
-  }
-
-  public class VCExprRModeLit : VCExprLiteral
-  {
-    public readonly RoundingMode Val;
-    internal VCExprRModeLit(RoundingMode val)
-      : base(Type.RMode)
-    {
-      this.Val = val;
-    }
-    [Pure]
-    [Reads(ReadsAttribute.Reads.Nothing)]
-    public override bool Equals(object that)
-    {
-      if (Object.ReferenceEquals(this, that))
-        return true;
-      if (that is VCExprRModeLit)
-        return Val == ((VCExprRModeLit)that).Val;
-      return false;
-    }
-    [Pure]
-    public override int GetHashCode()
-    {
       return Val.GetHashCode() * 72321;
     }
   }
@@ -1645,16 +1563,6 @@ namespace Microsoft.Boogie.VCExprAST {
     }
   }
 
-  public class VCExprSoftOp : VCExprCustomOp
-  {
-    public readonly int Weight;
-
-    public VCExprSoftOp(int weight) : base("soft##dummy", 2, Microsoft.Boogie.Type.Bool)
-    {
-      Weight = weight;
-    }
-  }
-
   public class VCExprCustomOp : VCExprOp {
     public readonly string/*!*/ Name;
     int arity;
@@ -1711,99 +1619,6 @@ namespace Microsoft.Boogie.VCExprAST {
       //Contract.Requires(expr != null);
       //Contract.Requires(visitor != null);
       return visitor.VisitCustomOp(expr, arg);
-    }
-  }
-
-  /////////////////////////////////////////////////////////////////////////////////
-  // Float operators
-
-  public class VCExprBinaryFloatOp : VCExprOp {
-    public readonly int Significand;
-    public readonly int Exponent;
-    private string op;
-
-    public override int Arity {
-      get {
-        return 2;
-      }
-    }
-    public override int TypeParamArity {
-      get {
-        return 2;
-      }
-    }
-    public override Type InferType(List<VCExpr> args, List<Type/*!*/>/*!*/ typeArgs) {
-      //Contract.Requires(cce.NonNullElements(typeArgs));
-      //Contract.Requires(cce.NonNullElements(args));
-      Contract.Ensures(Contract.Result<Type>() != null);
-      switch (op)
-      {
-        case ("+"):
-        case ("-"):
-        case ("*"):
-        case ("/"):
-          return Type.GetFloatType(Significand, Exponent);
-        case ("<="):
-        case ("<"):
-        case (">="):
-        case (">"):
-        case ("=="):
-        case ("!="):
-          return Type.Bool;
-        default:
-          Contract.Assert(false);
-          throw new cce.UnreachableException();
-      }
-    }
-
-    [Pure]
-    [Reads(ReadsAttribute.Reads.Nothing)]
-    public override bool Equals(object that) {
-      if (Object.ReferenceEquals(this, that))
-        return true;
-      if (that is VCExprBinaryFloatOp)
-        return this.Exponent == ((VCExprBinaryFloatOp)that).Exponent && this.Significand == ((VCExprBinaryFloatOp)that).Significand;
-      return false;
-    }
-    [Pure]
-    public override int GetHashCode() {
-      return Exponent * 81748912 + Significand * 67867979;
-    }
-
-    internal VCExprBinaryFloatOp(int sig, int exp, string op) {
-      this.Exponent = exp;
-      this.Significand = sig;
-      this.op = op;
-    }
-    public override Result Accept<Result, Arg>
-           (VCExprNAry expr, IVCExprOpVisitor<Result, Arg> visitor, Arg arg) {
-      //Contract.Requires(visitor != null);
-      //Contract.Requires(expr != null);
-      switch (op) { 
-      case ("+"):
-        return visitor.VisitFloatAddOp(expr, arg);
-      case ("-"):
-        return visitor.VisitFloatSubOp(expr, arg);
-      case ("*"):
-        return visitor.VisitFloatMulOp(expr, arg);
-      case ("/"):
-        return visitor.VisitFloatDivOp(expr, arg);
-      case ("<="):
-        return visitor.VisitFloatLeqOp(expr, arg);
-      case ("<"):
-        return visitor.VisitFloatLtOp(expr, arg);
-      case (">="):
-        return visitor.VisitFloatGeqOp(expr, arg);
-      case (">"):
-        return visitor.VisitFloatGtOp(expr, arg);
-      case ("=="):
-        return visitor.VisitEqOp(expr, arg);
-      case ("!="):
-        return visitor.VisitNeqOp(expr, arg);
-      default:
-        Contract.Assert(false);
-        throw new cce.UnreachableException();
-      }
     }
   }
 

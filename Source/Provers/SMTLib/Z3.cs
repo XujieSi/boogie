@@ -4,7 +4,6 @@
 //
 //-----------------------------------------------------------------------------
 
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -52,8 +51,7 @@ namespace Microsoft.Boogie.SMTLib
                 return;
             }
 
-            var proverExe = CommandLineOptions.Clo.Z3ExecutableName; 
-            proverExe = proverExe == null ? "z3.exe" : proverExe;
+            var proverExe = "z3.exe";
 
             if (_proverPath == null)
             {
@@ -71,15 +69,28 @@ namespace Microsoft.Boogie.SMTLib
                 }
 
                 List<string> z3Dirs = new List<string>();
-                var msrDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft Research\");
-                if (Directory.Exists(msrDir))
+
+                string programFiles = Environment.GetEnvironmentVariable("ProgramFiles");
+                if (programFiles != null)
                 {
-                  z3Dirs.AddRange(Directory.GetDirectories(msrDir, "Z3-*"));
-                }
-                var msrDirX86 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft Research\");
-                if (Directory.Exists(msrDirX86))
-                {
-                  z3Dirs.AddRange(Directory.GetDirectories(msrDirX86, "Z3-*"));
+                    string programFilesX86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)");
+                    if (programFiles.Equals(programFilesX86))
+                    {
+                        // If both %ProgramFiles% and %ProgramFiles(x86)% point to "ProgramFiles (x86)", use %ProgramW6432% instead.
+                        programFiles = Environment.GetEnvironmentVariable("ProgramW6432");
+                    }
+
+
+                    if (Directory.Exists(programFiles + @"\Microsoft Research\"))
+                    {
+                        string msrDir = programFiles + @"\Microsoft Research\";
+                        z3Dirs.AddRange(Directory.GetDirectories(msrDir, "Z3-*"));
+                    }
+                    if (Directory.Exists(programFilesX86 + @"\Microsoft Research\"))
+                    {
+                        string msrDir = programFilesX86 + @"\Microsoft Research\";
+                        z3Dirs.AddRange(Directory.GetDirectories(msrDir, "Z3-*"));
+                    }
                 }
 
                 int minMajor = 3, minMinor = 2;
@@ -186,20 +197,8 @@ namespace Microsoft.Boogie.SMTLib
                 return "SOFT_TIMEOUT";
         }
 
-        public static string SetRlimitOption()
-        {
-            int major, minor;
-            GetVersion(out major, out minor);
-            if (major > 4 || major == 4 && minor >= 3)
-                return "RLIMIT";
-            else
-                // not sure what is for "rlimit" in earlier versions.
-                return "";
-        }
-
         // options that work only on the command line
         static string[] commandLineOnly = { "TRACE", "PROOF_MODE" };
-
 
         public static void SetupOptions(SMTLibProverOptions options)
         {
@@ -209,22 +208,15 @@ namespace Microsoft.Boogie.SMTLib
           if (major > 4 || major == 4 && minor >= 3)
           {
 
-              bool fp = false; // CommandLineOptions.Clo.FixedPointEngine != null;
-
             // don't bother with auto-config - it would disable explicit settings for eager threshold and so on
-            if(!fp) options.AddWeakSmtOption("AUTO_CONFIG", "false");
+            options.AddWeakSmtOption("AUTO_CONFIG", "false");
 
             //options.AddWeakSmtOption("MODEL_PARTIAL", "true");
             //options.WeakAddSmtOption("MODEL_VALUE_COMPLETION", "false");
 
             // options.AddWeakSmtOption("MODEL_HIDE_UNUSED_PARTITIONS", "false"); TODO: what does this do?
 
-            // Make sure we get something that is parsable as a bitvector
-            options.AddWeakSmtOption("pp.bv_literals", "false");
-            if (!CommandLineOptions.Clo.UseSmtOutputFormat)
-            {
-              options.AddWeakSmtOption("MODEL.V2", "true");
-            }
+            options.AddWeakSmtOption("MODEL.V2", "true");
             //options.AddWeakSmtOption("ASYNC_COMMANDS", "false"); TODO: is this needed?
 
             if (!options.OptimizeForBv)
@@ -240,8 +232,7 @@ namespace Microsoft.Boogie.SMTLib
 
               // The left-to-right structural case-splitting strategy.
               //options.AddWeakSmtOption("SORT_AND_OR", "false"); // always false now
-
-              if (!fp) options.AddWeakSmtOption("smt.CASE_SPLIT", "3");
+              options.AddWeakSmtOption("smt.CASE_SPLIT", "3");
 
               // In addition delay adding unit conflicts.
               options.AddWeakSmtOption("smt.DELAY_UNITS", "true");
@@ -260,8 +251,7 @@ namespace Microsoft.Boogie.SMTLib
             // Complex proof attempts in VCC (and likely elsewhere) require matching depth of 20 or more.
 
             // the following will make the :weight option more usable
-              // KLM: this QI cost function is the default
-            // if (!fp) options.AddWeakSmtOption("smt.QI.COST", "|(+ weight generation)|"); // TODO: this doesn't seem to work
+            options.AddWeakSmtOption("smt.QI.COST", "|\"(+ weight generation)\"|"); // TODO: this doesn't seem to work
 
             //if (options.Inspector != null)
             //  options.WeakAddSmtOption("PROGRESS_SAMPLING_FREQ", "100");
@@ -277,11 +267,6 @@ namespace Microsoft.Boogie.SMTLib
               // options.AddSolverArgument("/T:" + (options.TimeLimit + 1000) / 1000);
             }
 
-            if (options.ResourceLimit > 0) 
-            {
-              options.AddWeakSmtOption("RLIMIT", options.ResourceLimit.ToString());
-            }
-
             if (options.Inspector != null)
               options.AddWeakSmtOption("PROGRESS_SAMPLING_FREQ", "200");
 
@@ -289,11 +274,6 @@ namespace Microsoft.Boogie.SMTLib
             {
               options.AddWeakSmtOption("smt.array.weak", "true");
               options.AddWeakSmtOption("smt.array.extensional", "false");
-            }
-
-            if (CommandLineOptions.Clo.PrintConjectures != null)
-            {
-                options.AddWeakSmtOption("fixedpoint.conjecture_file", CommandLineOptions.Clo.PrintConjectures + ".tmp");
             }
           }
           else

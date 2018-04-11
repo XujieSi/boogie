@@ -49,7 +49,7 @@ namespace Microsoft.Boogie.VCExprAST {
 
   public delegate VCExpr/*!*/ CodeExprConverter(CodeExpr/*!*/ codeExpr, Hashtable/*<Block, VCExprVar!>*//*!*/ blockVariables, List<VCExprLetBinding> bindings, bool isPositiveContext);
 
-  public class Boogie2VCExprTranslator : ReadOnlyVisitor, ICloneable {
+  public class Boogie2VCExprTranslator : StandardVisitor, ICloneable {
     // Stack on which the various Visit-methods put the result of the translation
     private readonly Stack<VCExpr/*!*/>/*!*/ SubExpressions = new Stack<VCExpr>();
     [ContractInvariantMethod]
@@ -76,7 +76,7 @@ namespace Microsoft.Boogie.VCExprAST {
       return Pop();
     }
 
-    public List<VCExpr/*!*/>/*!*/ Translate(IList<Expr> exprs) {
+    public List<VCExpr/*!*/>/*!*/ Translate(List<Expr> exprs) {
       Contract.Requires(exprs != null);
       Contract.Ensures(cce.NonNullElements(Contract.Result<List<VCExpr>>()));
       List<VCExpr/*!*/>/*!*/ res = new List<VCExpr/*!*/>();
@@ -314,9 +314,9 @@ namespace Microsoft.Boogie.VCExprAST {
 
     ///////////////////////////////////////////////////////////////////////////////////
 
-    public override Expr VisitLiteralExpr(LiteralExpr node) {
+    public override LiteralExpr VisitLiteralExpr(LiteralExpr node) {
       //Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Expr>() != null);
+      Contract.Ensures(Contract.Result<LiteralExpr>() != null);
       Push(TranslateLiteralExpr(node));
       return node;
     }
@@ -334,12 +334,7 @@ namespace Microsoft.Boogie.VCExprAST {
         return Gen.Integer(node.asBigNum);
       } else if (node.Val is BigDec) {
         return Gen.Real(node.asBigDec);
-      } else if (node.Val is BigFloat) {
-        return Gen.Float(node.asBigFloat);
-      } else if (node.Val is RoundingMode) {
-        return Gen.RMode(node.asRoundingMode);
-      }
-      else if (node.Val is BvConst) {
+      } else if (node.Val is BvConst) {
         return Gen.Bitvector((BvConst)node.Val);
       } else {
         System.Diagnostics.Debug.Assert(false, "unknown kind of literal " + node.tok.ToString());
@@ -459,16 +454,16 @@ namespace Microsoft.Boogie.VCExprAST {
       return node;
     }
 
-    public override Expr VisitExistsExpr(ExistsExpr node) {
+    public override ExistsExpr VisitExistsExpr(ExistsExpr node) {
       //Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Expr>() != null);
+      Contract.Ensures(Contract.Result<ExistsExpr>() != null);
       node = (ExistsExpr)this.VisitQuantifierExpr(node);
       return node;
     }
 
-    public override Expr VisitForallExpr(ForallExpr node) {
+    public override ForallExpr VisitForallExpr(ForallExpr node) {
       //Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Expr>() != null);
+      Contract.Ensures(Contract.Result<ForallExpr>() != null);
       node = (ForallExpr)this.VisitQuantifierExpr(node);
       return node;
     }
@@ -562,9 +557,9 @@ namespace Microsoft.Boogie.VCExprAST {
 
     ///////////////////////////////////////////////////////////////////////////////////
 
-    public override Expr VisitBvExtractExpr(BvExtractExpr node) {
+    public override BvExtractExpr VisitBvExtractExpr(BvExtractExpr node) {
       //Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Expr>() != null);
+      Contract.Ensures(Contract.Result<BvExtractExpr>() != null);
       Push(TranslateBvExtractExpr(node));
       return node;
     }
@@ -579,9 +574,9 @@ namespace Microsoft.Boogie.VCExprAST {
 
     ///////////////////////////////////////////////////////////////////////////////////
 
-    public override Expr VisitBvConcatExpr(BvConcatExpr node) {
+    public override BvConcatExpr VisitBvConcatExpr(BvConcatExpr node) {
       //Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Expr>() != null);
+      Contract.Ensures(Contract.Result<BvConcatExpr>() != null);
       Push(TranslateBvConcatExpr(node));
       return node;
     }
@@ -1007,12 +1002,9 @@ namespace Microsoft.Boogie.VCExprAST {
         if (cce.NonNull(e.Type).IsInt) {
           return Gen.Function(VCExpressionGenerator.SubIOp, Gen.Integer(BigNum.ZERO), e);
         }
-        else {// if (cce.NonNull(e.Type).IsReal) {
+        else {
           return Gen.Function(VCExpressionGenerator.SubROp, Gen.Real(BigDec.ZERO), e);
         }
-        //else  {//is float
-          //return Gen.Function(VCExpressionGenerator.SubFOp, Gen.Float(BigFloat.ZERO(8, 23)), e);
-        //} 
       }
       else {
         return Gen.Not(this.args);
@@ -1078,48 +1070,34 @@ namespace Microsoft.Boogie.VCExprAST {
       Contract.Requires(cce.NonNullElements(args));
       Contract.Ensures(Contract.Result<VCExpr>() != null);
       Contract.Assert(args.Count == 2);
-      Type t = cce.NonNull(cce.NonNull(args[0]).Type);
 
       switch (app.Op) {
         case BinaryOperator.Opcode.Add:
-          if (t.IsInt) {
+          if (cce.NonNull(cce.NonNull(args[0]).Type).IsInt) {
             return Gen.Function(VCExpressionGenerator.AddIOp, args);
           }
-          else if (t.IsReal) {
+          else {
             return Gen.Function(VCExpressionGenerator.AddROp, args);
           }
-          else { //t is float
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "+"), args);
-          }
         case BinaryOperator.Opcode.Sub:
-          if (t.IsInt) {
+          if (cce.NonNull(cce.NonNull(args[0]).Type).IsInt) {
             return Gen.Function(VCExpressionGenerator.SubIOp, args);
           }
-          else if (t.IsReal) {
+          else {
             return Gen.Function(VCExpressionGenerator.SubROp, args);
           }
-          else { //t is float
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "-"), args);
-          }
         case BinaryOperator.Opcode.Mul:
-          if (t.IsInt) {
+          if (cce.NonNull(cce.NonNull(args[0]).Type).IsInt) {
             return Gen.Function(VCExpressionGenerator.MulIOp, args);
           }
-          else if (t.IsReal) {
+          else {
             return Gen.Function(VCExpressionGenerator.MulROp, args);
-          }
-          else
-          { //t is float
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "*"), args);
           }
         case BinaryOperator.Opcode.Div:
           return Gen.Function(VCExpressionGenerator.DivIOp, args);
         case BinaryOperator.Opcode.Mod:
           return Gen.Function(VCExpressionGenerator.ModOp, args);
         case BinaryOperator.Opcode.RealDiv:
-          if (t.IsFloat) {
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "/"), args);
-          }
           VCExpr arg0 = cce.NonNull(args[0]);
           VCExpr arg1 = cce.NonNull(args[1]);
           if (cce.NonNull(arg0.Type).IsInt) {
@@ -1134,28 +1112,16 @@ namespace Microsoft.Boogie.VCExprAST {
         case BinaryOperator.Opcode.Eq:
         case BinaryOperator.Opcode.Iff:
           // we don't distinguish between equality and equivalence at this point
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "=="), args);
           return Gen.Function(VCExpressionGenerator.EqOp, args);
         case BinaryOperator.Opcode.Neq:
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "!="), args);
           return Gen.Function(VCExpressionGenerator.NeqOp, args);
         case BinaryOperator.Opcode.Lt:
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "<"), args);
           return Gen.Function(VCExpressionGenerator.LtOp, args);
         case BinaryOperator.Opcode.Le:
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, "<="), args);
           return Gen.Function(VCExpressionGenerator.LeOp, args);
         case BinaryOperator.Opcode.Ge:
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, ">="), args);
           return Gen.Function(VCExpressionGenerator.GeOp, args);
         case BinaryOperator.Opcode.Gt:
-          if (t.IsFloat)
-            return Gen.Function(Gen.BinaryFloatOp(t.FloatSignificand, t.FloatExponent, ">"), args);
           return Gen.Function(VCExpressionGenerator.GtOp, args);
         case BinaryOperator.Opcode.Imp:
           return Gen.Function(VCExpressionGenerator.ImpliesOp, args);

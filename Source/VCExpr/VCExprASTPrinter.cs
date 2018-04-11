@@ -242,67 +242,6 @@ namespace Microsoft.Boogie.VCExprAST {
       //Contract.Requires(node != null);
       return PrintNAry("Store", node, wr);
     }
-    public bool VisitFloatAddOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.add", node, wr);
-    }
-    public bool VisitFloatSubOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.sub", node, wr);
-    }
-    public bool VisitFloatMulOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.mul", node, wr);
-    }
-    public bool VisitFloatDivOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.div", node, wr);
-    }
-    public bool VisitFloatLeqOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.leq", node, wr);
-    }
-    public bool VisitFloatLtOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.lt", node, wr);
-    }
-    public bool VisitFloatGeqOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.geq", node, wr);
-    }
-    public bool VisitFloatGtOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.gt", node, wr);
-    }
-    public bool VisitFloatEqOp(VCExprNAry node, TextWriter wr)
-    {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      return PrintNAry("fp.eq", node, wr);
-    }
-    public bool VisitFloatNeqOp(VCExprNAry node, TextWriter wr) {
-      //Contract.Requires(wr != null);
-      //Contract.Requires(node != null);
-      bool toReturn = PrintNAry("not (fp.eq", node, wr);
-      wr.Write(")"); // A bit hacky, but it works
-      return toReturn;
-    }
     public bool VisitBvOp(VCExprNAry node, TextWriter wr) {
       //Contract.Requires(wr != null);
       //Contract.Requires(node != null);

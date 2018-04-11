@@ -594,8 +594,9 @@ namespace VC {
       {
         List<Cmd> cc = new List<Cmd>();
         // where clauses of global variables
-        foreach (var gvar in program.GlobalVariables) {
-          if (gvar.TypedIdent.WhereExpr != null) {
+        foreach (Declaration d in program.TopLevelDeclarations) {
+          GlobalVariable gvar = d as GlobalVariable;
+          if (gvar != null && gvar.TypedIdent.WhereExpr != null) {
             Cmd c = new AssumeCmd(gvar.tok, gvar.TypedIdent.WhereExpr);
             cc.Add(c);
           }
@@ -615,7 +616,7 @@ namespace VC {
         InjectPreconditions(impl, cc);
 
         // append postconditions, starting in exitBlock and continuing into other blocks, if needed
-        InjectPostConditions(impl, exitBlock, gotoCmdOrigins);
+        exitBlock = InjectPostConditions(impl, exitBlock, gotoCmdOrigins);
       }
       #endregion     
     }

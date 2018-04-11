@@ -23,9 +23,7 @@ namespace Microsoft.Boogie.SMTLib
       "and", "or", "not", "iff", "true", "false", "xor", "distinct", "ite", "=", "Bool",
       "=>", // implies (sic!)
       // Integers and reals
-      "Int", "Real", "*", "/", "-", "~", "+", "<", "<=", ">", ">=", "div", "mod", "rem",
-      "^", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "pi", "euler",
-      "to_real", "to_int", "is_int",
+      "Int", "Real", "*", "/", "-", "+", "<", "<=", ">", ">=", "div", "mod",
       // Bitvectors
       "extract", "concat", 
       "bvnot", "bvneg", "bvand", "bvor", "bvadd", "bvmul", "bvudiv", "bvurem", "bvshl", "bvlshr", "bvult",
@@ -37,29 +35,20 @@ namespace Microsoft.Boogie.SMTLib
       "bvsmod0", "bvsdiv_i", "bvudiv_i", "bvsrem_i", "bvurem_i", "bvumod_i", "bvule", "bvsle", "bvuge",
       "bvsge", "bvslt", "bvugt", "bvsgt", "bvxor", "bvnand", "bvnor", "bvxnor", "sign_extend", "zero_extend", 
       "repeat", "bvredor", "bvredand", "bvcomp", "bvumul_noovfl", "bvsmul_noovfl", "bvsmul_noudfl", "bvashr",
-      "rotate_left", "rotate_right", "ext_rotate_left", "ext_rotate_right", "int2bv", "bv2int", "mkbv",
-      // floating point (FIXME: Legacy, remove this)
-      "plusInfinity", "minusInfinity",
+      "rotate_left", "rotate_right", "ext_rotate_left", "ext_rotate_right", "int2bv", "bv2int",
+      // floating point
+      "plusInfinity", "minusInfinity", "NaN", 
+      "roundNearestTiesToEven", "roundNearestTiesToAway", "roundTowardPositive", "roundTowardNegative", "roundTowardZero", 
       "+", "-", "/", "*", "==", "<", ">", "<=", ">=", 
       "abs", "remainder", "fusedMA", "squareRoot", "roundToIntegral", 
       "isZero", "isNZero", "isPZero", "isSignMinus", "min", "max", "asFloat", 
-      // SMT v1 stuff (FIXME: Legacy, remove this)
+      // SMT v1 stuff
       "flet", "implies", "!=", "if_then_else",
       // Z3 extensions
       "lblneg", "lblpos", "lbl-lit",
-      "if", "&&", "||", "equals", "equiv", "bool", "minimize", "maximize",
+      "if", "&&", "||", "equals", "equiv", "bool",
       // Boogie-defined
       "real_pow", "UOrdering2", "UOrdering3", 
-      // Floating point (final draft SMTLIB-v2.5)
-      "NaN",
-      "fp.abs", "fp.neg", "fp.add", "fp.sub", "fp.mul", "fp.div", "fp.fma", "fp.sqrt", "fp.rem", "fp.roundToIntegral",
-      "fp.min", "fp.max", "fp.leq", "fp.lt", "fp.geq", "fp.gt", "fp.eq",
-      "fp.isNormal", "fp.isSubnormal", "fp.isZero", "fp.isInfinite", "fp.isNaN", "fp.isNegative", "fp.isPositive",
-      "fp", "fp.to_ubv", "fp.to_sbv", "to_fp",
-      // Rounding mode
-      "rmode",
-      "roundNearestTiesToEven", "roundNearestTiesToAway", "roundTowardPositive", "roundTowardNegative", "roundTowardZero",
-      "RNE", "RNA", "RTP", "RTN", "RTZ",
     };
 
     static HashSet<string> reservedSmtWords;
@@ -100,14 +89,9 @@ namespace Microsoft.Boogie.SMTLib
       return "|" + s + "|";
     }
 
-    static string FilterReserved(string s)
+    static string NonKeyword(string s)
     {
-      // Note symbols starting with ``.`` and ``@`` are reserved for internal
-      // solver use in SMT-LIBv2 however if we check for the first character
-      // being ``@`` then Boogie's tests fail spectacularly because they are
-      // used for labels so we don't check for it here. It hopefully won't matter
-      // in practice because ``@`` cannot be legally used in Boogie identifiers.
-      if (reservedSmtWords.Contains(s) || char.IsDigit(s[0]) || s[0] == '.')
+      if (reservedSmtWords.Contains(s) || char.IsDigit(s[0]))
         s = "q@" + s;
 
       // | and \ are illegal even in quoted identifiers
@@ -120,89 +104,30 @@ namespace Microsoft.Boogie.SMTLib
       return s;
     }
 
-    public IDictionary<string/*!*/, string/*!*/>/*!*/ LabelCounters; // Absy id -> local id
-    public IDictionary<string/*!*/, string/*!*/>/*!*/ CounterToLabels; // local id -> Absy id
-    private int CurrentLabelId;
-
-    public override void ResetLabelCount()
+    public static string LabelVar(string s)
     {
-      LabelCounters = new Dictionary<string, string>();
-      CounterToLabels = new Dictionary<string, string>();
-      CurrentLabelId = 0;
-    }
-
-    public override string LabelVar(string s)
-    {
-      return "%lbl%" + LabelName(s);
-    }
-
-    public override string LabelName(string s)
-    {
-
-      if (s[0] == '+' || s[0] == '@') {
-       return s[0] + AbsyIndexToLocalIndex(s.Substring(1));
-      } else {
-        return AbsyIndexToLocalIndex(s);
-      }
-    }
-    
-    private string AbsyIndexToLocalIndex (string s) { 
-      string counter;
-      if (!LabelCounters.TryGetValue(s, out counter)) { 
-        counter = CurrentLabelId.ToString();
-        CurrentLabelId++;
-        LabelCounters[s] = counter;
-        CounterToLabels[counter] = s;
-      }
-      return counter;
-    }
-
-    public override string AbsyLabel(string s)
-    {
-      if (s[0] == '+' || s[0] == '@') {
-        return s[0] + cce.NonNull(CounterToLabels[s.Substring(1)]);
-      } else {
-        return cce.NonNull(CounterToLabels[s.Substring(1)]);
-      }
+      return "%lbl%" + s;
     }
 
     public static string QuoteId(string s)
     {
-      return AddQuotes(FilterReserved(s));
+      return AddQuotes(NonKeyword(s));
     }
 
     public override string GetQuotedLocalName(object thingie, string inherentName)
     {
-      return AddQuotes(base.GetLocalName(thingie, FilterReserved(inherentName)));
+      return AddQuotes(base.GetLocalName(thingie, NonKeyword(inherentName)));
     }
 
     public override string GetQuotedName(object thingie, string inherentName)
     {
-      return AddQuotes(base.GetName(thingie, FilterReserved(inherentName)));
+      return AddQuotes(base.GetName(thingie, NonKeyword(inherentName)));
     }
 
     public SMTLibNamer()
     {
       this.Spacer = "@@";
       InitSymbolLists();
-      LabelCounters = new Dictionary<string, string>();
-      CounterToLabels = new Dictionary<string, string>();
-      CurrentLabelId = 0;
-    }
-
-    private SMTLibNamer(SMTLibNamer namer) : base(namer) { }
-
-    public override object Clone()
-    {
-      return new SMTLibNamer(this);
-    }
-
-    public override void Reset()
-    {
-      LabelCounters.Clear();
-      CounterToLabels.Clear();
-      CurrentLabelId = 0;
-      base.Reset();
     }
   }
 }

@@ -81,13 +81,13 @@ namespace Microsoft.Boogie {
             fixedArgs[i] = cce.NonNull((NamedDeclaration)args[i]).Name;
           } else if (args[i] is Type) {
             System.IO.StringWriter buffer = new System.IO.StringWriter();
-            using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/ false, /*pretty=*/ false)) {
+            using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, false)) {
               cce.NonNull((Type)args[i]).Emit(stream);
             }
             fixedArgs[i] = buffer.ToString();
           } else if (args[i] is Expr) {
             System.IO.StringWriter buffer = new System.IO.StringWriter();
-            using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/ false, /*pretty=*/ false)) {
+            using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, false)) {
               cce.NonNull((Expr/*!*/)args[i]).Emit(stream, 0, false);
             }
             fixedArgs[i] = buffer.ToString();
@@ -265,48 +265,6 @@ namespace Microsoft.Boogie {
       public readonly Hashtable /*string->Variable*//*!*/ VarSymbols = new Hashtable /*string->Variable*/();
       public /*maybe null*/ VarContextNode ParentContext;
       public readonly bool Opaque;
-      readonly ISet<string> assignedAssumptionVariables = new HashSet<string>();
-
-      public bool HasVariableBeenAssigned(string name)
-      {
-        Contract.Requires(name != null);
-
-        if (assignedAssumptionVariables.Contains(name))
-        {
-          return true;
-        }
-        else if (ParentContext != null)
-        {
-          return ParentContext.HasVariableBeenAssigned(name);
-        }
-        else
-        {
-          return false;
-        }
-      }
-
-      public bool MarkVariableAsAssigned(string name)
-      {
-        Contract.Requires(name != null);
-
-        if (VarSymbols.Contains(name))
-        {
-          if (assignedAssumptionVariables.Contains(name))
-          {
-            return false;
-          }
-          assignedAssumptionVariables.Add(name);
-          return true;
-        }
-        else if (ParentContext != null)
-        {
-          return ParentContext.MarkVariableAsAssigned(name);
-        }
-        else
-        {
-          return false;
-        }
-      }
 
       public VarContextNode(/*maybe null*/ VarContextNode parentContext, bool opaque) {
         ParentContext = parentContext;
@@ -337,18 +295,6 @@ namespace Microsoft.Boogie {
     public void PopVarContext() {
       Contract.Assert(varContext.ParentContext != null);
       varContext = varContext.ParentContext;
-    }
-
-    public readonly ISet<string> StatementIds = new HashSet<string>();
-
-    public void AddStatementId(IToken tok, string name)
-    {
-      if (StatementIds.Contains(name))
-      {
-        Error(tok, "more than one statement with same id: " + name);
-        return;
-      }
-      StatementIds.Add(name);
     }
 
     public void AddVariable(Variable var, bool global) {
@@ -403,22 +349,6 @@ namespace Microsoft.Boogie {
       // not present in the relevant levels
       return null;
     }
-
-    public bool HasVariableBeenAssigned(string name)
-    {
-      Contract.Requires(name != null);
-
-      return varContext.HasVariableBeenAssigned(name);
-    }
-
-    public void MarkVariableAsAssigned(string name)
-    {
-      Contract.Requires(name != null);
-
-      var success = varContext.MarkVariableAsAssigned(name);
-      Contract.Assume(success);
-    }
-
     Hashtable axioms = new Hashtable();
 
     public void AddAxiom(Axiom axiom) {
@@ -635,7 +565,7 @@ namespace Microsoft.Boogie {
     public bool InFrame(Variable v) {
       Contract.Requires(v != null);
       Contract.Requires(Frame != null);
-      return Frame.Any(f => f.Decl == v);
+      return Yields || Frame.Any(f => f.Decl == v);
     }
   }
 }

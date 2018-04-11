@@ -271,7 +271,7 @@ namespace Microsoft.Boogie.VCExprAST {
           sb.Append(TypeToString(t));
         } else {
           System.IO.StringWriter buffer = new System.IO.StringWriter();
-          using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, /*setTokens=*/ false, /*pretty=*/ false)) {
+          using (TokenTextWriter stream = new TokenTextWriter("<buffer>", buffer, false)) {
             t.Emit(stream);
           }
           sb.Append(buffer.ToString());
@@ -380,20 +380,9 @@ namespace Microsoft.Boogie.VCExprAST {
     internal const string realSubName = "realSub";
     internal const string realMulName = "realMul";
     internal const string realDivName = "realDiv";
-    internal const string floatAddName = "floatAdd";
-    internal const string floatSubName = "floatSub";
-    internal const string floatMulName = "floatMul";
-    internal const string floatDivName = "floatDiv";
-    internal const string floatLeqName = "floatLeq";
-    internal const string floatLtName = "floatLt";
-    internal const string floatGeqName = "floatGeq";
-    internal const string floatGtName = "floatGt";
-    internal const string floatEqName = "floatEq";
-    internal const string floatNeqName = "floatNeq";
     internal const string realPowName = "realPow";
     internal const string toIntName = "toIntCoercion";
     internal const string toRealName = "toRealCoercion";
-    internal const string toFloatName = "toFloatCoercion";
 
     internal void AssertAsTerm(string x, LineariserOptions options) {
       Contract.Requires(options != null);
@@ -894,87 +883,7 @@ namespace Microsoft.Boogie.VCExprAST {
         return true;
       }
 
-      public bool VisitFloatAddOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatAddName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatSubOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatSubName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatMulOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatMulName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatDivOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatDivName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatLeqOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatLeqName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatLtOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatLtName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatGeqOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatGeqName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatGtOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatGtName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatEqOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatEqName, node, options);
-        return true;
-      }
-
-      public bool VisitFloatNeqOp(VCExprNAry node, LineariserOptions options) {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteTermApplication(floatNeqName, node, options);
-        return true;
-      }
-
-      public bool VisitBvOp(VCExprNAry node, LineariserOptions options)
-      {
+      public bool VisitBvOp(VCExprNAry node, LineariserOptions options) {
         //Contract.Requires(options != null);
         //Contract.Requires(node != null);
         WriteTermApplication("$make_bv" + node.Type.BvBits, node, options);
@@ -1046,11 +955,8 @@ namespace Microsoft.Boogie.VCExprAST {
         if (node.Type.IsInt) {
           WriteTermApplication(intSubName, node, options);
         }
-        else if (node.Type.IsReal) {
-          WriteTermApplication(realSubName, node, options);
-        }
         else {
-          WriteTermApplication(floatSubName, node, options);
+          WriteTermApplication(realSubName, node, options);
         }
         return true;
       }
@@ -1061,11 +967,8 @@ namespace Microsoft.Boogie.VCExprAST {
         if (node.Type.IsInt) {
           WriteTermApplication(intMulName, node, options);
         }
-        else if (node.Type.IsReal) {
-          WriteTermApplication(realMulName, node, options);
-        }
         else {
-          WriteTermApplication(floatMulName, node, options);
+          WriteTermApplication(realMulName, node, options);
         }
         return true;
       }
@@ -1151,14 +1054,6 @@ namespace Microsoft.Boogie.VCExprAST {
         //Contract.Requires(options != null);
         //Contract.Requires(node != null);
         WriteApplication(toRealName, node, options);
-        return true;
-      }
-
-      public bool VisitToFloatOp(VCExprNAry node, LineariserOptions options)
-      {
-        //Contract.Requires(options != null);
-        //Contract.Requires(node != null);
-        WriteApplication(toFloatName, node, options);
         return true;
       }
 

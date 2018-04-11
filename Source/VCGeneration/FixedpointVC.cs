@@ -67,7 +67,7 @@ namespace Microsoft.Boogie
         Dictionary<string, bool> summaries = new Dictionary<string, bool>();
         Dictionary<Block, List<Block>> edgesCut = new Dictionary<Block, List<Block>>();
         string main_proc_name = "main";
-        Dictionary<string, int> extraRecBound = null;
+        
         
 
         public enum Mode { Corral, OldCorral, Boogie};
@@ -78,16 +78,7 @@ namespace Microsoft.Boogie
 
         private static Checker old_checker = null;
 
-        public static void CleanUp()
-        {
-            if (old_checker != null)
-            {
-                old_checker.Close();
-                old_checker = null;
-            }
-        }
-
-        public FixedpointVC( Program _program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers, Dictionary<string,int> _extraRecBound = null)
+        public FixedpointVC( Program _program, string/*?*/ logFilePath, bool appendLogFile, List<Checker> checkers)
             : base(_program, logFilePath, appendLogFile, checkers) 
         {
             switch (CommandLineOptions.Clo.FixedPointMode)
@@ -118,7 +109,7 @@ namespace Microsoft.Boogie
             program = _program;
             gen = ctx;
             if(old_checker == null)
-                checker = new Checker(this, program, logFilePath, appendLogFile, CommandLineOptions.Clo.ProverKillTime, CommandLineOptions.Clo.Resourcelimit, null);
+                checker = new Checker(this, program, logFilePath, appendLogFile, CommandLineOptions.Clo.ProverKillTime, null);
             else {
                 checker = old_checker;
                 checker.RetargetWithoutReset(program,checker.TheoremProver.Context);
@@ -126,7 +117,6 @@ namespace Microsoft.Boogie
             old_checker = checker;
             boogieContext = checker.TheoremProver.Context;
             linOptions = null; //  new Microsoft.Boogie.Z3.Z3LineariserOptions(false, options, new List<VCExprVar>());
-            extraRecBound = _extraRecBound;
         }
 
         Dictionary<string, AnnotationInfo> annotationInfo = new Dictionary<string, AnnotationInfo>();
@@ -195,7 +185,7 @@ namespace Microsoft.Boogie
             {
                 // in flat mode, all live globals should be in live set
 #if false
-                foreach (Variable v in program.GlobalVariables)
+                foreach (Variable v in program.GlobalVariables())
                 {
                     vars.Add(v);
                     names.Add(v.ToString());
@@ -214,7 +204,7 @@ namespace Microsoft.Boogie
             }
             else
             {
-                foreach (Variable v in program.GlobalVariables)
+                foreach (Variable v in program.GlobalVariables())
                 {
                     vars.Add(v);
                     names.Add("@old_" + v.ToString());
@@ -285,49 +275,6 @@ namespace Microsoft.Boogie
         }
 
 #if true
-        public void AnnotateProcRequires(Procedure proc, Implementation impl, ProverContext ctxt)
-        {
-            Contract.Requires(impl != null);
-
-            CurrentLocalVariables = impl.LocVars;
-
-            // collect the variables needed in the invariant
-            List<Expr> exprs = new List<Expr>();
-            List<Variable> vars = new List<Variable>();
-            List<string> names = new List<string>();
-
-            foreach (Variable v in program.GlobalVariables)
-            {
-                vars.Add(v);
-                exprs.Add(new IdentifierExpr(Token.NoToken, v));
-                names.Add(v.Name);
-            }
-            foreach (Variable v in proc.InParams)
-            {
-                Contract.Assert(v != null);
-                vars.Add(v);
-                exprs.Add(new IdentifierExpr(Token.NoToken, v));
-                names.Add(v.Name);
-            }
-            string name = impl.Name + "_precond";
-            TypedIdent ti = new TypedIdent(Token.NoToken, "", Microsoft.Boogie.Type.Bool);
-            Contract.Assert(ti != null);
-            Formal returnVar = new Formal(Token.NoToken, ti, false);
-            Contract.Assert(returnVar != null);
-            var function = new Function(Token.NoToken, name, vars, returnVar);
-            ctxt.DeclareFunction(function, "");
-
-            Expr invarExpr = new NAryExpr(Token.NoToken, new FunctionCall(function), exprs);
-
-            proc.Requires.Add(new Requires(Token.NoToken, false, invarExpr, "", null));
-            
-            var info = new AnnotationInfo();
-            info.filename = proc.tok.filename;
-            info.lineno = proc.Line;
-            info.argnames = names.ToArray();
-            info.type = AnnotationInfo.AnnotationType.LoopInvariant;
-            annotationInfo.Add(name, info);
-        }
 
         public void AnnotateProcEnsures(Procedure proc, Implementation impl, ProverContext ctxt)
         {
@@ -340,17 +287,10 @@ namespace Microsoft.Boogie
             List<Variable> vars = new List<Variable>();
             List<string> names = new List<string>();
 
-                foreach (Variable v in program.GlobalVariables)
+                foreach (Variable v in program.GlobalVariables())
                 {
                     vars.Add(v);
                     exprs.Add(new OldExpr(Token.NoToken,new IdentifierExpr(Token.NoToken, v)));
-                    names.Add(v.Name);
-                }
-                foreach (Variable v in proc.InParams)
-                {
-                    Contract.Assert(v != null);
-                    vars.Add(v);
-                    exprs.Add(new OldExpr(Token.NoToken, new IdentifierExpr(Token.NoToken, v)));
                     names.Add(v.Name);
                 }
                 foreach (IdentifierExpr ie in proc.Modifies)
@@ -361,6 +301,13 @@ namespace Microsoft.Boogie
                             exprs.Add(ie);
                             names.Add(ie.Decl.Name + "_out");
                         }
+                foreach (Variable v in proc.InParams)
+                {
+                            Contract.Assert(v != null);
+                            vars.Add(v);
+                            exprs.Add(new OldExpr(Token.NoToken, new IdentifierExpr(Token.NoToken, v)));
+                            names.Add(v.Name);
+                }
                 foreach (Variable v in proc.OutParams)
                 {
                             Contract.Assert(v != null);
@@ -390,44 +337,36 @@ namespace Microsoft.Boogie
         }
 #endif
 
-        void MarkAllFunctionImplementationsInline()
-        {
-            foreach (var func in program.Functions)
-            {
-                if (func.Body == null && func.DefinitionAxiom != null)
-                {
-                    var def = func.DefinitionAxiom.Expr as QuantifierExpr;
-                    var bod = def.Body as NAryExpr;
-                    func.Body = bod.Args[1];
-                    func.DefinitionAxiom = null;
-                }
-                if (func.Body != null)
-                    if (func.FindExprAttribute("inline") == null)
-                        func.AddAttribute("inline", Expr.Literal(100));
-            }
-        }
-
         void InlineAll()
         {
-            foreach (var impl in program.Implementations)
+            foreach (var d in program.TopLevelDeclarations)
             {
-                impl.OriginalBlocks = impl.Blocks;
-                impl.OriginalLocVars = impl.LocVars;
-                if(impl.Name != main_proc_name)
-                  if(impl.FindExprAttribute("inline") == null)
-                    impl.AddAttribute("inline", Expr.Literal(100));
+                var impl = d as Implementation;
+                if (impl != null)
+                {
+                    impl.OriginalBlocks = impl.Blocks;
+                    impl.OriginalLocVars = impl.LocVars;
+                    if(impl.Name != main_proc_name)
+                      if(impl.FindExprAttribute("inline") == null)
+                        impl.AddAttribute("inline", Expr.Literal(100));
+                }
             }
-            foreach (var impl in program.Implementations)
+            foreach (var d in program.TopLevelDeclarations)
             {
-                if (!impl.SkipVerification)
+                var impl = d as Implementation;
+                if (impl != null && !impl.SkipVerification)
                 {
                     Inliner.ProcessImplementation(program, impl);
                 }
             }
-            foreach (var impl in program.Implementations)
+            foreach (var d in program.TopLevelDeclarations)
             {
-                impl.OriginalBlocks = null;
-                impl.OriginalLocVars = null;
+                var impl = d as Implementation;
+                if (impl != null)
+                {
+                    impl.OriginalBlocks = null;
+                    impl.OriginalLocVars = null;
+                }
             }
         }
 
@@ -480,6 +419,13 @@ namespace Microsoft.Boogie
                 List<Variable> interfaceVars = new List<Variable>();
                 Expr assertExpr = new LiteralExpr(Token.NoToken, true);
                 Contract.Assert(assertExpr != null);
+                foreach (Variable v in program.GlobalVariables())
+                {
+                    Contract.Assert(v != null);
+                    interfaceVars.Add(v);
+                    if (v.Name == "error")
+                        inputErrorVariable = v;
+                }
                 // InParams must be obtained from impl and not proc
                 foreach (Variable v in impl.InParams)
                 {
@@ -495,13 +441,6 @@ namespace Microsoft.Boogie
                     interfaceVars.Add(c);
                     Expr eqExpr = Expr.Eq(new IdentifierExpr(Token.NoToken, c), new IdentifierExpr(Token.NoToken, v));
                     assertExpr = Expr.And(assertExpr, eqExpr);
-                }
-                foreach (Variable v in program.GlobalVariables)
-                {
-                    Contract.Assert(v != null);
-                    interfaceVars.Add(v);
-                    if (v.Name == "error")
-                        inputErrorVariable = v;
                 }
                 if (errorVariable != null)
                 {
@@ -548,7 +487,7 @@ namespace Microsoft.Boogie
                     {
                         Constant constant = new Constant(Token.NoToken, new TypedIdent(Token.NoToken, v.Name + temp++, v.TypedIdent.Type));
                         interfaceVarCopies[i].Add(constant);
-                        //program.AddTopLevelDeclaration(constant);
+                        //program.TopLevelDeclarations.Add(constant);
                     }
                 }
             }
@@ -636,8 +575,12 @@ namespace Microsoft.Boogie
         public void GenerateVCsForStratifiedInlining()
         {
             Contract.Requires(program != null);
-            foreach (var impl in program.Implementations)
+            foreach (Declaration decl in program.TopLevelDeclarations)
             {
+                Contract.Assert(decl != null);
+                Implementation impl = decl as Implementation;
+                if (impl == null)
+                    continue;
                 Contract.Assert(!impl.Name.StartsWith(recordProcName), "Not allowed to have an implementation for this guy");
 
                 Procedure proc = cce.NonNull(impl.Proc);
@@ -657,6 +600,11 @@ namespace Microsoft.Boogie
                     }
                     else if (mode == Mode.Corral || proc.FindExprAttribute("inline") != null || proc is LoopProcedure)
                     {
+                        foreach (Variable v in program.GlobalVariables())
+                        {
+                            Contract.Assert(v != null);
+                            exprs.Add(new OldExpr(Token.NoToken, new IdentifierExpr(Token.NoToken, v)));
+                        }
                         foreach (Variable v in proc.InParams)
                         {
                             Contract.Assert(v != null);
@@ -666,11 +614,6 @@ namespace Microsoft.Boogie
                         {
                             Contract.Assert(v != null);
                             exprs.Add(new IdentifierExpr(Token.NoToken, v));
-                        }
-                        foreach (Variable v in program.GlobalVariables)
-                        {
-                            Contract.Assert(v != null);
-                            exprs.Add(new OldExpr(Token.NoToken, new IdentifierExpr(Token.NoToken, v)));
                         }
                         foreach (IdentifierExpr ie in proc.Modifies)
                         {
@@ -695,8 +638,10 @@ namespace Microsoft.Boogie
 
             if (mode == Mode.Boogie) return;
 
-            foreach (var proc in program.Procedures)
+            foreach (var decl in program.TopLevelDeclarations)
             {
+                var proc = decl as Procedure;
+                if (proc == null) continue;
                 if (!proc.Name.StartsWith(recordProcName)) continue;
                 Contract.Assert(proc.InParams.Count == 1);
 
@@ -721,100 +666,6 @@ namespace Microsoft.Boogie
                 Expr freePostExpr = new NAryExpr(Token.NoToken, new FunctionCall(recordFunc), exprs);
                 proc.Ensures.Add(new Ensures(true, freePostExpr));
             }
-        }
-		
-		private void FixedPointToSpecs(){
-			
-			if(mode != Mode.Corral || CommandLineOptions.Clo.PrintFixedPoint == null)
-				return; // not implemented for other annotation modes yet
-			
-            var twr = new TokenTextWriter(CommandLineOptions.Clo.PrintFixedPoint, /*pretty=*/ false);
-			Dictionary<string, RPFP.Node> pmap = new Dictionary<string,RPFP.Node> ();
-
-			foreach (var node in rpfp.nodes)
-				pmap.Add ((node.Name as VCExprBoogieFunctionOp).Func.Name, node);
-			
-			foreach (var impl in program.Implementations)
-            {
-                Contract.Assert(!impl.Name.StartsWith(recordProcName), "Not allowed to have an implementation for this guy");
-
-                Procedure proc = cce.NonNull(impl.Proc);
-
-                {
-                    StratifiedInliningInfo info = new StratifiedInliningInfo(impl, program, boogieContext, QuantifierExpr.GetNextSkolemId());
-                    implName2StratifiedInliningInfo[impl.Name] = info;
-                    // We don't need controlFlowVariable for stratified Inlining
-                    //impl.LocVars.Add(info.controlFlowVariable);
-                    List<Expr> exprs = new List<Expr>();
-
-                    {
-                        if (pmap.ContainsKey(impl.Name))
-                        {
-                            RPFP.Node node = pmap[impl.Name];
-                            var annot = node.Annotation;
-                            EmitProcSpec(twr, proc, info, annot);
-                        }
-                    }
-                }
-            }
-			twr.Close ();
-		}
-
-        private void EmitProcSpec(TokenTextWriter twr, Procedure proc, StratifiedInliningInfo info, RPFP.Transformer annot)
-        {
-            // last ensures clause will be the symbolic one
-            if (!info.isMain)
-            {
-                var ens = proc.Ensures[proc.Ensures.Count - 1];
-                if (ens.Condition != Expr.False) // this is main
-                {
-                    var postExpr = ens.Condition as NAryExpr;
-                    var args = postExpr.Args;
-
-                    var ind = annot.IndParams;
-                    var bound = new Dictionary<VCExpr, Expr>();
-                    for (int i = 0; i < args.Count; i++)
-                    {
-                        bound[ind[i]] = args[i];
-                    }
-                    var new_ens_cond = VCExprToExpr(annot.Formula, bound);
-                    if (new_ens_cond != Expr.True)
-                    {
-                        var new_ens = new Ensures(false, new_ens_cond);
-                        var enslist = new List<Ensures>();
-                        enslist.Add(new_ens);
-                        var new_proc = new Procedure(proc.tok, proc.Name, proc.TypeParameters, proc.InParams,
-                                                     proc.OutParams, new List<Requires>(), new List<IdentifierExpr>(), enslist);
-                        new_proc.Emit(twr, 0);
-                    }
-                }
-            }
-        }
-
-        static int ConjectureFileCounter = 0;
-
-        private void ConjecturesToSpecs()
-        {
-
-            if (mode != Mode.Corral || CommandLineOptions.Clo.PrintConjectures == null)
-                return; // not implemented for other annotation modes yet
-
-            var twr = new TokenTextWriter(CommandLineOptions.Clo.PrintConjectures + "." + ConjectureFileCounter.ToString(), /*pretty=*/ false);
-            ConjectureFileCounter++;
-
-            foreach (var c in rpfp.conjectures)
-            {
-                var name = c.node.Name.GetDeclName();
-                if (implName2StratifiedInliningInfo.ContainsKey(name))
-                {
-                    StratifiedInliningInfo info = implName2StratifiedInliningInfo[c.node.Name.GetDeclName()];
-                    Implementation impl = info.impl;
-                    Procedure proc = impl.Proc;
-                    EmitProcSpec(twr, proc, info, c.bound);
-                }
-            }
-
-            twr.Close ();     
         }
 
         private Term ExtractSmallerVCsRec(TermDict< Term> memo, Term t, List<Term> small, Term lbl = null)
@@ -989,9 +840,9 @@ namespace Microsoft.Boogie
                 else if (f.GetKind() == DeclKind.Label)
                 {
                     var arg = t.GetAppArgs()[0];
-                    if (arg.GetKind() == TermKind.App && arg.GetAppDecl().GetKind() == DeclKind.Uninterpreted)
+                    var r = arg.GetAppDecl();
+                    if (r.GetKind() == DeclKind.Uninterpreted)
                     {
-                        var r = arg.GetAppDecl();
                         if (memo.TryGetValue(arg, out res))
                             goto done;
                         if (!annotationInfo.ContainsKey(r.GetDeclName()) && !arg.GetAppDecl().GetDeclName().StartsWith("_solve_"))
@@ -1073,9 +924,9 @@ namespace Microsoft.Boogie
                 else if (f.GetKind() == DeclKind.Label)
                 {
                     var arg = t.GetAppArgs()[0];
-                    if (arg.GetKind() == TermKind.App && arg.GetAppDecl().GetKind() == DeclKind.Uninterpreted)
+                    var r = arg.GetAppDecl();
+                    if (r.GetKind() == DeclKind.Uninterpreted)
                     {
-                        var r = arg.GetAppDecl();
                         if (memo.TryGetValue(arg, out res))
                         {
                             if(res != ctx.MkTrue())
@@ -1360,8 +1211,6 @@ namespace Microsoft.Boogie
             var oldDagOption = CommandLineOptions.Clo.vcVariety;
             CommandLineOptions.Clo.vcVariety = CommandLineOptions.VCVariety.Dag;
 
-            // MarkAllFunctionImplementationsInline(); // This is for SMACK, which goes crazy with functions
-
             // Run live variable analysis (TODO: should this be here?)
 #if false
             if (CommandLineOptions.Clo.LiveVariableAnalysis == 2)
@@ -1376,17 +1225,25 @@ namespace Microsoft.Boogie
 
                 // find the name of the main procedure
                 main_proc_name = null; // default in case no entry point defined
-                foreach (var impl in program.Implementations)
+                foreach (var d in program.TopLevelDeclarations)
                 {
-                    if (QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint"))
-                        main_proc_name = impl.Proc.Name;
+                    var impl = d as Implementation;
+                    if (impl != null)
+                    {
+                        if (QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint"))
+                            main_proc_name = impl.Proc.Name;
+                    }
                 }
                 if (main_proc_name == null)
                 {
-                    foreach (var impl in program.Implementations)
+                    foreach (var d in program.TopLevelDeclarations)
                     {
-                        if (impl.Proc.Name == "main" || impl.Proc.Name.EndsWith(".main"))
-                            main_proc_name = impl.Proc.Name;
+                        var impl = d as Implementation;
+                        if (impl != null)
+                        {
+                            if (impl.Proc.Name == "main" || impl.Proc.Name.EndsWith(".main"))
+                                main_proc_name = impl.Proc.Name;
+                        }
                     }
                 }
                 if (main_proc_name == null)
@@ -1396,9 +1253,10 @@ namespace Microsoft.Boogie
                 {
                     InlineAll();
                     Microsoft.Boogie.BlockCoalescer.CoalesceBlocks(program);
-                    foreach (var impl in program.Implementations)
+                    foreach (var d in program.TopLevelDeclarations)
                     {
-                        if (main_proc_name == impl.Proc.Name)
+                        var impl = d as Implementation;
+                        if (impl != null && main_proc_name == impl.Proc.Name)
                         {
                             Microsoft.Boogie.LiveVariableAnalysis.ClearLiveVariables(impl);
                             CyclicLiveVariableAnalysis.ComputeLiveVariables(impl);
@@ -1411,11 +1269,11 @@ namespace Microsoft.Boogie
 
                     if (style == AnnotationStyle.Procedure || style == AnnotationStyle.Call)
                     {
-                        foreach (var impl in program.Implementations)
+                        foreach (var proc in program.TopLevelDeclarations)
                         {
-                            if (!QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint"))
-                                AnnotateProcRequires(impl.Proc, impl, boogieContext);
-                            AnnotateProcEnsures(impl.Proc, impl, boogieContext);
+                            var impl = proc as Implementation;
+                            if (impl != null)
+                                AnnotateProcEnsures(impl.Proc, impl, boogieContext);
                         }
                         if (style == AnnotationStyle.Call)
                         {
@@ -1426,30 +1284,40 @@ namespace Microsoft.Boogie
                     // must do this after annotating procedures, else calls
                     // will be prematurely desugared
                     
-                    foreach (var impl in program.Implementations)
+                    foreach (var d in program.TopLevelDeclarations)
                     {
-                        Microsoft.Boogie.LiveVariableAnalysis.ClearLiveVariables(impl);
-                        CyclicLiveVariableAnalysis.ComputeLiveVariables(impl);
+                        var impl = d as Implementation;
+                        if (impl != null)
+                        {
+                            Microsoft.Boogie.LiveVariableAnalysis.ClearLiveVariables(impl);
+                            CyclicLiveVariableAnalysis.ComputeLiveVariables(impl);
+                        }
                     }
 
 
                     if (style == AnnotationStyle.Flat || style == AnnotationStyle.Call)
                     {
-                        foreach (var impl in program.Implementations)
+                        foreach (var proc in program.TopLevelDeclarations)
                         {
-                            AnnotateLoops(impl, boogieContext);
+                            var impl = proc as Implementation;
+                            if (impl != null)
+                                AnnotateLoops(impl, boogieContext);
                         }
                     }
                     if (style == AnnotationStyle.Call)
                     {
                         Dictionary<string, bool> impls = new Dictionary<string, bool>();
-                        foreach (var impl in program.Implementations)
+                        foreach (var proc in program.TopLevelDeclarations)
                         {
-                            impls.Add(impl.Proc.Name, true);
+                            var impl = proc as Implementation;
+                            if (impl != null)
+                                impls.Add(impl.Proc.Name, true);
                         }
-                        foreach (var impl in program.Implementations)
+                        foreach (var proc in program.TopLevelDeclarations)
                         {
-                            AnnotateCallSites(impl, boogieContext, impls);
+                            var impl = proc as Implementation;
+                            if (impl != null)
+                                AnnotateCallSites(impl, boogieContext, impls);
                         }
                     }
                     if (style == AnnotationStyle.Flat)
@@ -1513,128 +1381,84 @@ namespace Microsoft.Boogie
 
         /** Check the RPFP, and return a counterexample if there is one. */
 
-        public VC.ConditionGeneration.Outcome Check(ref RPFP.Node cexroot)
+        public RPFP.LBool Check(ref RPFP.Node cexroot)
         {
             var start = DateTime.Now;
 
             ErrorHandler handler = new ErrorHandler();
             RPFP.Node cex;
             varSubst = new Dictionary<int,Dictionary<string,string>>();
-
-#if false
-            int origRecursionBound = CommandLineOptions.Clo.RecursionBound;
-            if (CommandLineOptions.Clo.RecursionBound > 0 && extraRecBound != null)
-            {
-                int maxExtra = 0;
-                foreach (string s in extraRecBound.Keys)
-                {
-                    int extra = extraRecBound[s];
-                    if (extra > maxExtra) maxExtra = extra;
-                }
-                CommandLineOptions.Clo.RecursionBound += maxExtra;
-            }
-#endif
-            
             ProverInterface.Outcome outcome =
-                 checker.TheoremProver.CheckRPFP("name", rpfp, handler, out cex, varSubst, extraRecBound);
+                 checker.TheoremProver.CheckRPFP("name", rpfp, handler, out cex, varSubst);
             cexroot = cex;
-
-#if false
-            CommandLineOptions.Clo.RecursionBound = origRecursionBound;
-#endif
           
             Console.WriteLine("solve: {0}s", (DateTime.Now - start).TotalSeconds);
             
             switch(outcome)
             {
                 case ProverInterface.Outcome.Valid:
-                    return VC.ConditionGeneration.Outcome.Correct;
-                case ProverInterface.Outcome.Bounded:
-                    return VC.ConditionGeneration.Outcome.ReachedBound;
+                   return RPFP.LBool.False;
                 case ProverInterface.Outcome.Invalid:
-                    return VC.ConditionGeneration.Outcome.Errors;
-                case ProverInterface.Outcome.TimeOut:
-                    return VC.ConditionGeneration.Outcome.TimedOut;
-                case ProverInterface.Outcome.OutOfResource:
-                    return VC.ConditionGeneration.Outcome.OutOfResource;
+                   return RPFP.LBool.True;
                 default:
-                   return VC.ConditionGeneration.Outcome.Inconclusive;
+                   return RPFP.LBool.Undef;
             }
         }
 
         private bool generated = false;
 
-        static private Object thisLock = new Object();
-
         public override VC.VCGen.Outcome VerifyImplementation(Implementation impl, VerifierCallback collector)
         {
-
-            lock (thisLock)
+            var start = DateTime.Now; 
+            
+            if (!generated)
             {
-                Procedure proc = impl.Proc;
-
-                // we verify all the impls at once, so we need to execute only once
-                // TODO: make sure needToCheck is true only once
-                bool needToCheck = false;
-                if (mode == Mode.OldCorral)
-                    needToCheck = proc.FindExprAttribute("inline") == null && !(proc is LoopProcedure);
-                else if (mode == Mode.Corral || mode == Mode.Boogie)
-                    needToCheck = QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint") && !(proc is LoopProcedure);
-                else
-                    needToCheck = impl.Name == main_proc_name;
-
-                if (needToCheck)
-                {
-
-                    var start = DateTime.Now;
-
-                    if (!generated)
-                    {
-                        Generate();
-                        Console.WriteLine("generate: {0}s", (DateTime.Now - start).TotalSeconds);
-                        generated = true;
-                    }
-
-
-                    Console.WriteLine("Verifying {0}...", impl.Name);
-
-                    RPFP.Node cexroot = null;
-                    // start = DateTime.Now;
-                    var checkres = Check(ref cexroot);
-                    Console.WriteLine("check: {0}s", (DateTime.Now - start).TotalSeconds);
-                    switch (checkres)
-                    {
-                        case Outcome.Errors:
-                            Console.WriteLine("Counterexample found.\n");
-                            // start = DateTime.Now;
-                            Counterexample cex = CreateBoogieCounterExample(cexroot.owner, cexroot, impl);
-                            // cexroot.owner.DisposeDualModel();
-                            // cex.Print(0);  // just for testing
-                            collector.OnCounterexample(cex, "assertion failure");
-                            Console.WriteLine("cex: {0}s", (DateTime.Now - start).TotalSeconds);
-                            ConjecturesToSpecs();
-                            break;
-                        case Outcome.Correct:
-                            Console.WriteLine("Procedure is correct. (fixed point reached)");
-							FixedPointToSpecs();
-                            ConjecturesToSpecs();
-                            break;
-                        case Outcome.ReachedBound:
-                            Console.WriteLine("Procedure is correct. (recursion bound reached)");
-                            FixedPointToSpecs();
-                            ConjecturesToSpecs();
-                            break;
-                        default:
-                            Console.WriteLine("Inconclusive result.");
-                            ConjecturesToSpecs();
-                            break;
-                    }
-                    return checkres;
-                    
-                }
-
-                return Outcome.Inconclusive;
+                Generate();
+                Console.WriteLine("generate: {0}s", (DateTime.Now - start).TotalSeconds);
+                generated = true;
             }
+            
+            Procedure proc = impl.Proc;
+            
+            // we verify all the impls at once, so we need to execute only once
+            // TODO: make sure needToCheck is true only once
+            bool needToCheck = false; 
+            if (mode == Mode.OldCorral)
+                needToCheck = proc.FindExprAttribute("inline") == null && !(proc is LoopProcedure);
+            else if (mode == Mode.Corral)
+                needToCheck = QKeyValue.FindBoolAttribute(impl.Attributes, "entrypoint") && !(proc is LoopProcedure);
+            else
+                needToCheck = impl.Name == main_proc_name;
+
+            if (needToCheck)
+            {
+                Console.WriteLine("Verifying {0}...", impl.Name);
+
+                RPFP.Node cexroot = null;
+                // start = DateTime.Now;
+                var checkres = Check(ref cexroot);
+                Console.WriteLine("check: {0}s", (DateTime.Now - start).TotalSeconds);
+                switch (checkres)
+                {
+                    case RPFP.LBool.True:
+                        Console.WriteLine("Counterexample found.\n");
+                        // start = DateTime.Now;
+                        Counterexample cex = CreateBoogieCounterExample(cexroot.owner, cexroot, impl);
+                        // cexroot.owner.DisposeDualModel();
+                        // cex.Print(0);  // just for testing
+                        collector.OnCounterexample(cex, "assertion failure");
+                        Console.WriteLine("cex: {0}s", (DateTime.Now - start).TotalSeconds);
+                        return VC.ConditionGeneration.Outcome.Errors;
+                    case RPFP.LBool.False:
+                        Console.WriteLine("Procedure is correct.");
+                        return Outcome.Correct;
+                    case RPFP.LBool.Undef:
+                        Console.WriteLine("Inconclusive result.");
+                        return Outcome.ReachedBound;
+                }
+            }
+            
+            return Outcome.Inconclusive;
         }
 
         public void FindLabelsRec(HashSet<Term> memo, Term t, Dictionary<string, Term> res)
@@ -2108,138 +1932,7 @@ namespace Microsoft.Boogie
                 return m.MkElement(subst[uniqueName]);
             return m.MkFunc("@undefined", 0).GetConstant();
         }
-		
-		class InternalError : Exception {
-		}
-		
-		
-		private BinaryOperator.Opcode VCOpToOp (VCExprOp op)
-		{
-			if (op == VCExpressionGenerator.AddIOp)
-				return BinaryOperator.Opcode.Add;
-			if (op == VCExpressionGenerator.SubIOp)
-				return BinaryOperator.Opcode.Sub;
-			if (op == VCExpressionGenerator.MulIOp)
-				return BinaryOperator.Opcode.Mul;
-			if (op == VCExpressionGenerator.DivIOp)
-				return BinaryOperator.Opcode.Div;
-			if (op == VCExpressionGenerator.EqOp)
-				return BinaryOperator.Opcode.Eq;
-			if (op == VCExpressionGenerator.LeOp)
-				return BinaryOperator.Opcode.Le;
-			if (op == VCExpressionGenerator.LtOp)
-				return BinaryOperator.Opcode.Lt;
-			if (op == VCExpressionGenerator.GeOp)
-				return BinaryOperator.Opcode.Ge;
-			if (op == VCExpressionGenerator.GtOp)
-				return BinaryOperator.Opcode.Gt;
-			if (op == VCExpressionGenerator.AndOp)
-				return BinaryOperator.Opcode.And;
-			if (op == VCExpressionGenerator.OrOp)
-				return BinaryOperator.Opcode.Or;
-			throw new InternalError();
-		}
-		
-		private Expr MakeBinary (BinaryOperator.Opcode op, List<Expr> args)
-		{
-			if(args.Count == 0){
-				// with zero args we need the identity of the op
-				switch(op){
-					case BinaryOperator.Opcode.And:
-					    return Expr.True;
-					case BinaryOperator.Opcode.Or:
-					    return Expr.False;
-				    case BinaryOperator.Opcode.Add:
-						return new LiteralExpr(Token.NoToken,Microsoft.Basetypes.BigNum.ZERO);
-				default:
-					throw new InternalError();
-				}
-			}
-			var temp = args[0];
-			for(int i = 1; i < args.Count; i++)
-				temp = Expr.Binary(Token.NoToken,op,temp,args[i]);
-			return temp;		
-		}
-		
-		private Variable MakeVar(VCExprVar v){
-			var foo = new TypedIdent(Token.NoToken,v.Name.ToString(),v.Type);
-			return new BoundVariable(Token.NoToken,foo);
-		}
-		
-		private Expr VCExprToExpr (VCExpr e, Dictionary<VCExpr,Expr> bound)
-		{
-			if (e is VCExprVar) {
-				if(bound.ContainsKey(e))
-					return bound[e];
-                return Expr.Ident(MakeVar(e as VCExprVar)); // TODO: this isn't right
-			}
-			if (e is VCExprIntLit) {
-				var n = e as VCExprIntLit;
-				return new LiteralExpr(Token.NoToken,n.Val);
-			}
-			if (e is VCExprNAry) {
-				var f = e as VCExprNAry;
-				var args = new List<Expr>();
-				for(int i = 0; i < f.Arity; i++){
-					args.Add (VCExprToExpr (f[i],bound));
-				}
-				
-				if(f.Op == VCExpressionGenerator.NotOp)
-					return Expr.Unary(Token.NoToken, UnaryOperator.Opcode.Not, args[0]);
 
-				if(f.Op == VCExpressionGenerator.IfThenElseOp)
-					return new NAryExpr(Token.NoToken,new IfThenElse(Token.NoToken),args);
-					
-				if(f.Op is VCExprSelectOp){
-					var idx = new List<Expr>();
-					idx.Add(args[1]);
-				    return Expr.Select(args[0],idx);
-				}
-				
-				if(f.Op is VCExprStoreOp){
-					var idx = new List<Expr>();
-					idx.Add(args[1]);
-					return Expr.Store(args[0],idx,args[2]);
-				}
-
-                if (f.Op is VCExprBoogieFunctionOp)
-                {
-                    return new NAryExpr(Token.NoToken, 
-                        new FunctionCall((f.Op as VCExprBoogieFunctionOp).Func), args);
-                }
-
-				var op = VCOpToOp (f.Op);
-				return MakeBinary(op,args);
-			}
-			
-			if(e is VCExprQuantifier) {
-				var f = e as VCExprQuantifier;
-				var vs = new List<Variable>();
-				var new_bound = new Dictionary<VCExpr,Expr>(bound);
-				foreach(var v in f.BoundVars){
-					var ve = MakeVar(v);
-					vs.Add(ve);
-					new_bound.Add (v,Expr.Ident (ve));
-				}
-				var bd = VCExprToExpr(f.Body,new_bound);
-				if(f.Quan == Quantifier.EX)
-					return new ExistsExpr(Token.NoToken,vs,bd);
-				else
-					return new ForallExpr(Token.NoToken,vs,bd);	
-			}
-			if (e == VCExpressionGenerator.True) {
-				return Expr.True;
-			}
-			if (e == VCExpressionGenerator.False) {
-				return Expr.False;
-			}
-			if (e is VCExprLet) {
-				
-			}
-			
-			throw new InternalError();
-		}
-		
 
     }
 

@@ -27,7 +27,6 @@ namespace Microsoft.Boogie {
     // Say (DBG_WAS_VALID) or (DBG_WAS_INVALID) after query
     public bool ForceLogStatus = false;
     public int TimeLimit = 0;
-    public int ResourceLimit = 0;
     public int MemoryLimit = 0;
     public int Verbosity = 0;
     public string ProverPath;
@@ -82,7 +81,7 @@ The generic options may or may not be used by the prover plugin.
       }
     }
 
-    public virtual void Parse(IEnumerable<string/*!*/>/*!*/ opts) {
+    public virtual void Parse(List<string/*!*/>/*!*/ opts) {
       Contract.Requires(cce.NonNullElements(opts));
       StringBuilder sb = new StringBuilder(stringRepr);
       Contract.Assert(sb != null);

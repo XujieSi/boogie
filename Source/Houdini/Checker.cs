@@ -16,7 +16,7 @@ using VC;
 using System.Linq;
 
 namespace Microsoft.Boogie.Houdini {
-  public class ExistentialConstantCollector : ReadOnlyVisitor {
+  public class ExistentialConstantCollector : StandardVisitor {
       public static void CollectHoudiniConstants(Houdini houdini, Implementation impl, out ExistentialConstantCollector collector)
       {
           collector = new ExistentialConstantCollector(houdini);
@@ -238,7 +238,6 @@ namespace Microsoft.Boogie.Houdini {
       stats.proverTime += queryTime;
       stats.numProverQueries++;
       if (CommandLineOptions.Clo.Trace) {
-        Console.WriteLine("Outcome = " + proverOutcome);
         Console.WriteLine("Time taken = " + queryTime);
       }
 
@@ -352,7 +351,7 @@ namespace Microsoft.Boogie.Houdini {
             outcome = proverInterface.CheckAssumptions(hardAssumptions, softAssumptions, out unsatisfiedSoftAssumptions, handler);
             hardAssumptions.RemoveAt(hardAssumptions.Count - 1);
 
-            if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.OutOfResource || outcome == ProverInterface.Outcome.Undetermined)
+            if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.Undetermined)
                 break;
 
             var reason = new HashSet<string>();
@@ -382,13 +381,10 @@ namespace Microsoft.Boogie.Houdini {
             var unsatisfiedSoftAssumptions2 = new List<int>();
             outcome = proverInterface.CheckAssumptions(hardAssumptions, softAssumptions2, out unsatisfiedSoftAssumptions2, handler);
 
-            if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.OutOfResource|| outcome == ProverInterface.Outcome.Undetermined)
+            if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.Undetermined)
                 break;
 
             unsatisfiedSoftAssumptions2.Iter(i => reason.Remove(softAssumptions2[i].ToString()));
-            var reason1 = new HashSet<string>(); //these are the reasons for inconsistency
-            unsatisfiedSoftAssumptions2.Iter(i => reason1.Add(softAssumptions2[i].ToString()));
-
             if (CommandLineOptions.Clo.Trace)
             {
                 Console.Write("Revised reason for removal of {0}: ", refutedConstant.Name);
@@ -399,14 +395,9 @@ namespace Microsoft.Boogie.Houdini {
             {
                 Houdini.explainHoudiniDottyFile.WriteLine("{0} -> {1} [ label = \"{2}\" color=red ];", refutedConstant.Name, r, descriptiveName);
             }
-            //also add the removed reasons using dotted edges (requires- x != 0, requires- x == 0 ==> assert x != 0)
-            foreach (var r in reason1)
-            {
-                Houdini.explainHoudiniDottyFile.WriteLine("{0} -> {1} [ label = \"{2}\" color=blue style=dotted ];", refutedConstant.Name, r, descriptiveName);
-            }
         } while (false);
 
-        if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.OutOfResource || outcome == ProverInterface.Outcome.Undetermined)
+        if (outcome == ProverInterface.Outcome.TimeOut || outcome == ProverInterface.Outcome.OutOfMemory || outcome == ProverInterface.Outcome.Undetermined)
         {
             Houdini.explainHoudiniDottyFile.WriteLine("{0} -> {1} [ label = \"{2}\" color=red ];", refutedConstant.Name, "TimeOut", descriptiveName);
         }

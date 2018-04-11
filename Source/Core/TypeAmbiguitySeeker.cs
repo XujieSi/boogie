@@ -14,7 +14,7 @@ using System.Collections.Generic;
 
 namespace Microsoft.Boogie {
 
-  public class TypeAmbiguitySeeker : ReadOnlyVisitor {
+  public class TypeAmbiguitySeeker : StandardVisitor {
 
     private readonly InTypeSeeker/*!*/ inTypeSeeker = new InTypeSeeker();
     private readonly TypecheckingContext/*!*/ TC;
@@ -62,7 +62,7 @@ namespace Microsoft.Boogie {
     }
   }
 
-  internal class InTypeSeeker : ReadOnlyVisitor {
+  internal class InTypeSeeker : StandardVisitor {
 
     internal bool FoundAmbiguity = false;
 
@@ -70,7 +70,7 @@ namespace Microsoft.Boogie {
     private Type Instantiate(Type node, Type inst) {
       Contract.Requires(inst != null);
       Contract.Requires(node != null);
-      Contract.Ensures(Contract.Result<Type>() == node);
+      Contract.Ensures(Contract.Result<Type>() != null);
       FoundAmbiguity = true;
       bool success = node.Unify(inst);
       Contract.Assert(success);
