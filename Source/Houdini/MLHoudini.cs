@@ -739,14 +739,14 @@ namespace Microsoft.Boogie.Houdini {
             var elapsed = DateTime.Now;
             this.totaltime = elapsed - start;
 
-            if (true)
+            if (CommandLineOptions.Clo.Trace)
             {
                 Console.WriteLine("Prover time = {0}", proverTime.TotalSeconds.ToString("F2"));
-                //Console.WriteLine("Number of prover queries = " + numProverQueries);
+                Console.WriteLine("Number of prover queries = " + numProverQueries);
 
-                //Console.WriteLine("Number of examples:" + this.numPosExamples);
-                //Console.WriteLine("Number of counter-examples:" + this.numNegCounterExamples);
-                //Console.WriteLine("Number of implications:" + this.numImplications);
+                Console.WriteLine("Number of examples:" + this.numPosExamples);
+                Console.WriteLine("Number of counter-examples:" + this.numNegCounterExamples);
+                Console.WriteLine("Number of implications:" + this.numImplications);
             }
 
             if (CommandLineOptions.Clo.PrintAssignment)
@@ -991,7 +991,7 @@ namespace Microsoft.Boogie.Houdini {
                 List<dataPoint> ps = new List<dataPoint>();
                 c5samplePointToClassAttr.Keys.Iter(k => ps.Add(k));
                 Debug.Assert(ps.Count == 2);
-                res = "I:{" + outputDataPoint(ps[0]) + "<=>" + outputDataPoint(ps[1]) + "}";
+                res = "I:{" + outputDataPoint(ps[0]) + ";" + outputDataPoint(ps[1]) + "}";
             }
             else {
                 Debug.Assert(c5samplePointToClassAttr.Count == 1);
