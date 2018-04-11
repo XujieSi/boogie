@@ -1350,10 +1350,10 @@ namespace Microsoft.Boogie
         CommandLineOptions.Clo.TypeEncodingMethod = CommandLineOptions.TypeEncoding.Monomorphic;
 
         // Run Abstract Houdini
-        var mlice = new Houdini.MLHoudiniSymb(program, CommandLineOptions.Clo.MLHoudiniSymb, filename);
-        var mliceout = mlice.ComputeSummaries();
-        ProcessOutcome(mliceout.outcome, mliceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
-        ProcessErrors(mliceout.errors, mliceout.outcome, Console.Out, er);
+        //var mlice = new Houdini.MLHoudiniSymb(program, CommandLineOptions.Clo.MLHoudiniSymb, filename);
+        //var mliceout = mlice.ComputeSummaries();
+        //ProcessOutcome(mliceout.outcome, mliceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
+        //ProcessErrors(mliceout.errors, mliceout.outcome, Console.Out, er);
 
         return PipelineOutcome.Done;
     }

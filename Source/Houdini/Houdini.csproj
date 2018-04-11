@@ -155,7 +155,6 @@
     <Compile Include="MLHoudini.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="MLHoudiniSymb.cs" />
     <Compile Include="Houdini.cs" />
     <Compile Include="StagedHoudini.cs" />
     <Compile Include="ConcurrentHoudini.cs" />
