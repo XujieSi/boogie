@@ -393,9 +393,9 @@ namespace Microsoft.Boogie {
     public bool OverlookBoogieTypeErrors = false;
     public bool Verify = true;
     public bool TraceVerify = false;
-    public int /*(0:3)*/ ErrorTrace = 1;
+    public int /*(0:3)*/ ErrorTrace = 0;
     public bool IntraproceduralInfer = true;
-    public bool ContractInfer = false;
+    public bool ContractInfer = true;
     public bool ExplainHoudini = false;
     public bool ConcurrentHoudini = false;
     public bool ModifyTopologicalSorting = false;
@@ -445,7 +445,7 @@ namespace Microsoft.Boogie {
       Always
     }
     public ShowEnvironment ShowEnv = ShowEnvironment.DuringPrint;
-    public bool DontShowLogo = false;
+    public bool DontShowLogo = true;
     [ContractInvariantMethod]
     void ObjectInvariant3() {
       Contract.Invariant(-1 <= LoopFrameConditions && LoopFrameConditions < 3);
