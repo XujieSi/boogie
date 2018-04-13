@@ -365,7 +365,7 @@ namespace Microsoft.Boogie {
     }
 
     public bool VerifySnapshots;
-    public bool VerifySeparately;
+    public bool VerifySeparately = true;
     public string PrintFile = null;
     public int PrintUnstructured = 0;
     public int DoomStrategy = -1;

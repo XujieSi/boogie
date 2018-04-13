@@ -55,7 +55,7 @@ public static int Parse (string/*!*/ filename, /*maybe null*/ List<string/*!*/> 
   Contract.Requires(cce.NonNullElements(defines,true));
 
     if (S) {
-      return Parse(filename, "dummy.bpl", out program);
+      return Parse(filename, "dummy" + DateTime.Now + ".bpl", out program);
     }
   if (defines == null) {
     defines = new List<string/*!*/>();

@@ -66,7 +66,6 @@ namespace Microsoft.Boogie {
       foreach (string file in CommandLineOptions.Clo.Files) {
         if (Parser.S) {
           fileList.Add(file);
-          break;
         }
         string extension = Path.GetExtension(file);
         if (extension != null) {
