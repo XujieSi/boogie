@@ -95,7 +95,10 @@ namespace Microsoft.Boogie {
           goto END;
         }
       }
-      ExecutionEngine.ProcessFiles(fileList);
+      bool res = ExecutionEngine.ProcessFiles(fileList);
+      if (res) {
+        Console.Write("0 errors");
+      }
 
     END:
       if (CommandLineOptions.Clo.XmlSink != null) {

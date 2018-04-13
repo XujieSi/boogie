@@ -406,7 +406,7 @@ namespace Microsoft.Boogie
     static IDictionary<string, IList<CancellationTokenSource>> RequestIdToCancellationTokenSources = new ConcurrentDictionary<string, IList<CancellationTokenSource>>();
 
 
-    public static void ProcessFiles(List<string> fileNames, bool lookForSnapshots = true)
+    public static Boolean ProcessFiles(List<string> fileNames, bool lookForSnapshots = true)
     {
       Contract.Requires(cce.NonNullElements(fileNames));
 
@@ -414,9 +414,11 @@ namespace Microsoft.Boogie
       {
         foreach (var f in fileNames)
         {
-          ProcessFiles(new List<string> { f }, lookForSnapshots);
+          Boolean res = ProcessFiles(new List<string> { f }, lookForSnapshots);
+          if (!res) return res;
         }
-        return;
+
+        return true;
       }
 
       if (CommandLineOptions.Clo.VerifySnapshots && lookForSnapshots)
@@ -447,14 +449,14 @@ namespace Microsoft.Boogie
         {
           ProcessFiles(new List<string>(s), false);
         }
-        return;
+        return true;
       }
 
       using (XmlFileScope xf = new XmlFileScope(CommandLineOptions.Clo.XmlSink, fileNames[fileNames.Count - 1]))
       {
         Program program = ParseBoogieProgram(fileNames, false);
         if (program == null)
-          return;
+          return false;
         if (CommandLineOptions.Clo.PrintFile != null)
         {
           PrintBplFile(CommandLineOptions.Clo.PrintFile, program, false);
@@ -464,7 +466,7 @@ namespace Microsoft.Boogie
         MoverTypeChecker moverTypeChecker;
         PipelineOutcome oc = ResolveAndTypecheck(program, fileNames[fileNames.Count - 1], out linearTypeChecker, out moverTypeChecker);
         if (oc != PipelineOutcome.ResolvedAndTypeChecked)
-          return;
+          return false;
 
         if (CommandLineOptions.Clo.PrintCFGPrefix != null)
         {
@@ -505,12 +507,19 @@ namespace Microsoft.Boogie
         {
           case PipelineOutcome.Done:
           case PipelineOutcome.VerificationCompleted:
-            printer.WriteTrailer(stats);
+            return true;
+            //printer.WriteTrailer(stats);
+            break;
+          case PipelineOutcome.ResolutionError:
+            //printer.WriteTrailer(stats);
+            return false;
             break;
           default:
             break;
         }
       }
+
+      return true;
     }
 
 
@@ -1335,7 +1344,8 @@ namespace Microsoft.Boogie
         var mliceout = mlice.ComputeSummaries();
         ProcessOutcome(mliceout.outcome, mliceout.errors, "", stats, Console.Out, CommandLineOptions.Clo.ProverKillTime, er);
         ProcessErrors(mliceout.errors, mliceout.outcome, Console.Out, er);
-       
+
+            if (mliceout.errors.Any()) { return PipelineOutcome.ResolutionError; }
         return PipelineOutcome.Done;
     }
 
